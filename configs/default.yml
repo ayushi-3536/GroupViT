@@ -1,7 +1,7 @@
 data:
-  batch_size: 256
+  batch_size: 128
   pin_memory: true
-  num_workers: 6
+  num_workers: 4
   # Thomas said it should be at least about 5-10x your batch size; beyond that,
   # the differences become academic.
   shuffle_buffer: 10000
@@ -30,13 +30,21 @@ data:
         length: 11866987
       imagenet:
         type: img_cls_pair
-        path: local_data/imagenet_shards
-        prefix: imagenet-val-{000000..000049}.tar
+        path: /misc/student/sharmaa/imagenet/shards
+        prefix: imagenet-val-{000000..000006}.tar
         length: 50000
+      coco_train:
+        type: img_txt_pair
+        path: /misc/student/sharmaa/train_coco/mscoco1
+        prefix: train_coco_{000000..000059}.tar
+        length: 60
+
+
     train:
-      - gcc3m
-      - gcc12m
-      - yfcc14m
+      #- gcc3m
+      #- gcc12m
+      #- yfcc14m
+      - coco_train
     val:
       - imagenet
 
@@ -87,13 +95,13 @@ evaluate:
     template: subset
   seg:
     save_best: true
-    cfg: segmentation/configs/_base_/datasets/pascal_voc12.py
+    cfg: segmentation/configs/_base_/datasets/coco.py
     template: simple
     opts: []
 
 checkpoint:
   auto_resume: true
-  resume: ''
+  resume: '' #'/misc/student/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth'
   freq: 1
   max_kept: -1
   save_freq: 1
@@ -102,7 +110,7 @@ checkpoint:
 model_name: '' # display name in the logger
 output: ???
 tag: default
-print_freq: 10
+print_freq: 1
 seed: 0
 wandb: false
 local_rank: ???

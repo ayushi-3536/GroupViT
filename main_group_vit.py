@@ -87,6 +87,8 @@ def parse_args():
 
 
 def train(cfg):
+    
+    logger = get_logger()
     if cfg.wandb and dist.get_rank() == 0:
         import wandb
         wandb.init(
@@ -101,14 +103,15 @@ def train(cfg):
     dist.barrier()
     dataset_train, dataset_val, \
         data_loader_train, data_loader_val = build_loader(cfg.data)
+    
+    logger.info(f"dataset traibn:{dataset_train}")
     data_loader_seg = build_seg_dataloader(build_seg_dataset(cfg.evaluate.seg))
 
-    logger = get_logger()
 
     logger.info(f'Creating model:{cfg.model.type}/{cfg.model_name}')
     model = build_model(cfg.model)
     model.cuda()
-    logger.info(str(model))
+    #logger.info(str(model))
 
     optimizer = build_optimizer(cfg.train, model)
     if cfg.train.amp_opt_level != 'O0':
@@ -149,6 +152,9 @@ def train(cfg):
     logger.info('Start training')
     start_time = time.time()
     for epoch in range(cfg.train.start_epoch, cfg.train.epochs):
+        
+        torch.cuda.empty_cache()
+        print("epoch",epoch)
         loss_train_dict = train_one_epoch(cfg, model, data_loader_train, optimizer, epoch, lr_scheduler)
         if dist.get_rank() == 0 and (epoch % cfg.checkpoint.save_freq == 0 or epoch == (cfg.train.epochs - 1)):
             save_checkpoint(cfg, epoch, model_without_ddp, {
@@ -220,7 +226,33 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     end = time.time()
     for idx, samples in enumerate(data_loader):
 
+        logger.info(f'idx:{idx}')
+
         batch_size = config.data.batch_size
+        # print("batch size",batch_size)
+        # print("samples",len(samples['image']))
+        # images = samples['image'].data
+        # print("batch tensor shape", len(images))
+        # print("image1", images[0].shape)
+        # imagebatch = images[0]
+
+        # print("first image",imagebatch[0])
+        
+        # print("first image shape",imagebatch[0].shape)
+        # import matplotlib.pyplot as plt
+        # import numpy as np
+        # fi=imagebatch[0]
+        # print("fi",fi.shape)
+        # print("type fi", type)
+        #plt.imshow(np.transpose(fi.cpu().numpy(), (1,2,0)))
+        #plt.imsave('test.png', np.transpose(fi.cpu().numpy()))
+        #plt.imshow(fi.numpy()[0], cmap='gray')
+        # print("second image",imagebatch[1])
+        # #for img in imagebatch:
+        # for img1 in imagebatch:
+        #     if torch.equal(img1, imagebatch[0]):
+        #         print("torch equal or not?", torch.equal(img1, imagebatch[0]))
+
 
         losses = model(**samples)
 
@@ -320,6 +352,7 @@ def validate_cls(config, data_loader, model):
             build_dataset_class_tokens(text_transform, config.evaluate.cls.template, imagenet_classes)))
     logger.info('Zero shot classifier built')
     for idx, samples in enumerate(data_loader):
+        logger.debug(f'idx:{idx}')
         target = samples.pop('target').data[0].cuda()
         target = data2cuda(target)
 
@@ -328,17 +361,21 @@ def validate_cls(config, data_loader, model):
 
         # measure accuracy and record loss
         loss = criterion(output, target)
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))    
+        logger.info(f'acc1:{acc1}, acc5:{acc5}, loss:{loss}')
 
         acc1 = reduce_tensor(acc1)
         acc5 = reduce_tensor(acc5)
         loss = reduce_tensor(loss)
-
+        
+        loss_meter.update(loss.item(),target.size(0))
+        
+        
         loss_meter.update(loss.item(), target.size(0))
         acc1_meter.update(acc1.item(), target.size(0))
         acc5_meter.update(acc5.item(), target.size(0))
-
-        # measure elapsed time
+        #measure elapsed time
+        logger.debug("all metrics updated")
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -399,6 +436,7 @@ def validate_seg(config, data_loader, model):
 def main():
     args = parse_args()
     cfg = get_config(args)
+    print("cfg", cfg)
 
     if cfg.train.amp_opt_level != 'O0':
         assert amp is not None, 'amp not installed!'
@@ -450,7 +488,7 @@ def main():
     logger.info(f'Git hash: {get_git_hash(digits=7)}')
 
     # print config
-    logger.info(OmegaConf.to_yaml(cfg))
+    logger.debug(OmegaConf.to_yaml(cfg))
 
     train(cfg)
     dist.barrier()

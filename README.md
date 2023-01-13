@@ -290,6 +290,9 @@ python convert_dataset/convert_coco.py local_data/data/coco/ -o local_data/data/
 
 Train on a single node:
 
+
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 1 --resume /misc/student/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/student/sharmaa/outputs/task1
+
 ```shell
 (node0)$ ./tools/dist_launch.sh main_group_vit.py /path/to/config $GPUS_PER_NODE
 ```
@@ -338,7 +341,8 @@ We used 16 NVIDIA V100 GPUs for pre-training (in 2 days) in our paper.
 ```
 
 #### COCO
-
+./tools/dist_launch.sh main_seg.py      $1 --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/coco.py
+/misc/student/sharmaa/coco_stuff164k
 ```shell
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/coco.py
 ```

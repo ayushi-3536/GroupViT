@@ -17,8 +17,13 @@ from datasets import template_meta
 
 
 def reduce_tensor(tensor):
+    import time
+    #print("Inside reduce:",tensor)
     rt = tensor.clone()
+    start = time.time()
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
+    #print("time for reduce op", time.time()-start)
+
     rt /= dist.get_world_size()
     return rt
 

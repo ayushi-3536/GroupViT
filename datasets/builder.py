@@ -106,11 +106,13 @@ def warn_and_continue(exn):
 def build_dataset(is_train, config):
     img_transform = build_img_transform(is_train, config.img_aug)
     text_transform = build_text_transform(is_train, config.text_aug)
+    #print("is_train",is_train)
     split = 'train' if is_train else 'val'
     dataset_type = None
     tar_file_list = []
     total_length = 0
     for ds in config.dataset[split]:
+        #print("current dataset:",ds)
         ds_meta = config.dataset.meta[ds]
         if dataset_type is None:
             dataset_type = ds_meta.type
@@ -132,14 +134,37 @@ def build_dataset(is_train, config):
     # yapf: disable
     if is_train:
         dataset = (  # noqa
-            wds.WebDataset(tar_file_list, repeat=True, handler=warn_and_continue)
-            .shuffle(config.shuffle_buffer)
+            wds.WebDataset(tar_file_list, repeat=True, handler=warn_and_continue, shardshuffle=True)
+            .shuffle(config.shuffle_buffer, initial=600000 )
             .decode('pil', handler=warn_and_continue)
             .rename(image='jpg;png;jpeg', text='text;txt', keep=False, handler=warn_and_continue)
             .map_dict(image=img_transform, text=text_transform, handler=warn_and_continue)
+            #.slice(dist.get_rank(), total_length, dist.get_world_size())
             .with_length(total_length))
+        print("dataset", type(dataset))
+
+        # from PIL import Image 
+        # import PIL 
+        # from itertools import islice   
+        # for i,sample in enumerate(islice(dataset, 0, 64)):
+        #     for key, value in sample.items():
+        #         print("i:",i)
+        #         print(key, repr(value))
+        #         if key is 'image':
+        #             value.save(f'img_{i}.jpg')
+        #     print()
     else:
         # zero shot classification validation
+        print("rank",dist.get_rank())
+        print("ws",dist.get_world_size())
+        # dataset = wds.SimpleShardList(tar_file_list)
+        #     #  wds.shuffle(0),
+        #     #  wds.decode('pil', handler=warn_and_continue),
+        #     #  wds.rename(image='jpg;png;jpeg', target='cls', keep=False),
+        #     #  wds.map_dict(image=img_transform, target=ToDataContainer()),
+        #     #  wds.slice(dist.get_rank(), total_length, dist.get_world_size()))
+        
+        #dataset = wds.with_length(dataset,length=total_length)
         dataset = (  # noqa
             wds.WebDataset(tar_file_list, repeat=False, handler=warn_and_continue)
             .shuffle(0)
@@ -148,6 +173,7 @@ def build_dataset(is_train, config):
             .map_dict(image=img_transform, target=ToDataContainer())
             .slice(dist.get_rank(), total_length, dist.get_world_size())
             .with_length(total_length))
+        print(":dataset type", type(dataset))
     # yapf: enable
 
     return dataset

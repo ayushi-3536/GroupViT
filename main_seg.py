@@ -80,8 +80,8 @@ def inference(cfg):
     model.cuda()
     logger.info(str(model))
 
-    if cfg.train.amp_opt_level != 'O0':
-        model = amp.initialize(model, None, opt_level=cfg.train.amp_opt_level)
+    #if cfg.train.amp_opt_level != 'O0':
+    model = amp.initialize(model, None, opt_level=cfg.train.amp_opt_level)
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f'number of params: {n_parameters}')
@@ -150,11 +150,12 @@ def main():
     args = parse_args()
     cfg = get_config(args)
 
-    if cfg.train.amp_opt_level != 'O0':
-        assert amp is not None, 'amp not installed!'
+    # if cfg.train.amp_opt_level != 'O0':
+    #     assert amp is not None, 'amp not installed!'
 
     with read_write(cfg):
         cfg.evaluate.eval_only = True
+    print("check cuda", torch.cuda.is_available())
 
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         rank = int(os.environ['RANK'])
@@ -163,6 +164,7 @@ def main():
     else:
         rank = -1
         world_size = -1
+    print("local rank",cfg.local_rank)
     torch.cuda.set_device(cfg.local_rank)
 
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)

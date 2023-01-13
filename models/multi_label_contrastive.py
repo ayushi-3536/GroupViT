@@ -124,20 +124,23 @@ class MultiLabelContrastive(nn.Module):
     def loss(self, image_x, text_x):
 
         batch_size = image_x.shape[0]
+        #print("current batch size", batch_size)
         # get label globally
         labels = torch.arange(batch_size, dtype=torch.long, device=image_x.device) + batch_size * dist.get_rank()
-
+        #print("labels",labels)
         # [B, C]
         image_x = F.normalize(image_x, dim=-1)
         text_x = F.normalize(text_x, dim=-1)
 
         logits_per_img = image_x @ dist_collect(text_x).t()
         logits_per_text = text_x @ dist_collect(image_x).t()
+        # print("logits per image", logits_per_img.shape)
+        # print("logits per text", logits_per_text.shape)
 
         logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
         loss_img = self.cross_entropy(logits_per_img * logit_scale, labels)
         loss_text = self.cross_entropy(logits_per_text * logit_scale, labels)
-
+        
         loss = 0.5 * (loss_img + loss_text)
 
         return loss
@@ -152,6 +155,8 @@ class MultiLabelContrastive(nn.Module):
         Returns:
 
         """
+
+        print("Inside multi label loss")
         # [B, L1, C], L1 = 1
         image_feat = F.normalize(image_feat, dim=-1)
         # [B, L2, C]
@@ -177,10 +182,10 @@ class MultiLabelContrastive(nn.Module):
 
         image_x = rearrange(image_feat, 'b l c -> (b l) c')
         text_x = rearrange(text_feat, 'b l c -> (b l) c')
-
+        
         logits_per_img = image_x @ dist_collect(text_x).t()
         logits_per_text = text_x @ dist_collect(image_x).t()
-
+        
         # get label globally
         # [B, L1, B, L2, W]
         labels_per_img = F.one_hot(
