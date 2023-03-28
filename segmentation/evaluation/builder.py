@@ -20,6 +20,7 @@ from .group_vit_seg import GroupViTSegInference
 def build_seg_dataset(config):
     """Build a dataset from config."""
     cfg = mmcv.Config.fromfile(config.cfg)
+    print("cfg.data.test", cfg.data.test)
     dataset = build_dataset(cfg.data.test)
     return dataset
 

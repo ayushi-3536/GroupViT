@@ -1,10 +1,13 @@
 _base_: 'default.yml'
 data:
   text_aug:
-    multi_label: 3
+    multi_label: 5
+    pre_generated_nouns: false
+    generate_prompt_for_np: true
 
 model:
   type: MultiLabelContrastive
+  debugging: True
   img_encoder:
     type: GroupViT
     embed_dim: 384

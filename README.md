@@ -80,8 +80,22 @@ pip install nltk ftfy regex tqdm
 * To run the demo from the command line:
 
 ```shell
-python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /path/to/checkpoint --vis input_pred_label final_group --input demo/examples/voc.jpg --output_dir demo/output
+python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis input_pred_label final_group --input demo/examples/voc.jpg --output_dir demo/output
 ```
+python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/gs2_ft_grouping_lr_scaling_0.01_1cl_de20/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco/images/000000147725.jpg --dataset coco  --output_dir demo/output/coco/gs2_ft_grouping_lr_scaling_0.01_1cl_de20
+
+python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/gs2finetune_onlygrouping_64bw2/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/voc.jpg --dataset coco  --output_dir demo/output/gs2_ft_only_groupinglayer
+
+
+python demo/demo_seg.py --cfg configs/CLIPgroup_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco.jpg --dataset coco  --output_dir demo/output/clipgs2
+
+python demo/demo_seg.py --cfg configs/gs1_group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/gs1_allparam/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco.jpg --dataset coco  --output_dir demo/output/gs1_allparam
+
+python demo/demo_seg.py --cfg configs/gs3_group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4_gs3_mario/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco.jpg --dataset coco --output_dir demo/output/gs3_trainfromscratch_bs64_w4
+
+python demo/demo_seg.py --cfg configs/gs3_group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4_gs3_mario/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco.jpg --dataset coco --output_dir demo/output/gs3_trainfromscratch_bs64_w4
+
+python demo/demo_seg.py --cfg configs/gs3_group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4_gs3_mario/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco.jpg --dataset coco --output_dir demo/output/gs3_trainfromscratch_bs64_w4
   The output is saved in `demo/output/`.
 
 ## Benchmark Results
@@ -291,8 +305,27 @@ python convert_dataset/convert_coco.py local_data/data/coco/ -o local_data/data/
 Train on a single node:
 
 
-./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 1 --resume /misc/student/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/student/sharmaa/outputs/task1
+./tools/dist_launch.sh main_group_vit.py configs/gs1_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs1_all_75new
 
+./tools/dist_launch.sh main_group_vit.py configs/gs1_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/outputs/gs1_allparam/checkpoint.pth --output /misc/lmbraid21/sharmaa/outputs/gs1_finetunaftertrainingfor10epoch
+
+./tools/dist_launch.sh main_group_vit.py configs/gs3_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs3_ft_grouping_lropttuned_0.01
+
+./tools/dist_launch.sh main_group_vit.py configs/rt_gs3_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs3afterremapping_rt
+
+./tools/dist_launch.sh test_trainable_param.py configs/gs3_group_vit_gcc_yfcc_30e.yml 
+
+python test_trainable_param.py --cfg configs/gs3_group_vit_gcc_yfcc_30e.yml 
+
+./tools/dist_launch.sh main_group_vit.py configs/pacl_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/pacl_gs2_gl
+
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_grouping_np
+
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 4 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_allparam_lrtuned
+
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 4 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_allparam_lrtuned
+
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_ft_grouping_lr_scaling_0.01_we1
 ```shell
 (node0)$ ./tools/dist_launch.sh main_group_vit.py /path/to/config $GPUS_PER_NODE
 ```
@@ -330,15 +363,21 @@ We used 16 NVIDIA V100 GPUs for pre-training (in 2 days) in our paper.
 
 #### Pascal VOC
 
+
 ```shell
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint
 ```
 
+./tools/dist_launch.sh main_seg.py configs/group_vit_gcc_yfcc_30e.yml 8 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth
+#
+#/misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4/ckpt_epoch_11_best_miou.pth
+#/misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4/checkpoint.pth
 #### Pascal Context
 
 ```shell
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/pascal_context.py
 ```
+./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/pascal_context.py
 
 #### COCO
 ./tools/dist_launch.sh main_seg.py      $1 --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/coco.py

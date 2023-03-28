@@ -42,6 +42,7 @@ from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.data.transforms import _pil_interp
 from torchvision import transforms
+from scripts import load_nouns
 
 from .formatting import ToDataContainer
 from .tokenizer import SimpleTokenizer
@@ -96,6 +97,41 @@ def build_loader(config):
     return dataset_train, dataset_val, data_loader_train, data_loader_val
 
 
+def build_loader_sync(config):
+    
+    dataset_train = build_dataset_sync(is_train=True, config=config)
+    dataset_val = build_dataset_sync(is_train=False, config=config)
+    dc_collate = partial(collate, samples_per_gpu=config.batch_size)
+    train_len = len(dataset_train)
+    init_fn = partial(worker_init_fn, num_workers=config.num_workers, rank=0, seed=config.seed)
+    data_loader_train = wds.WebLoader(
+        dataset_train.batched(config.batch_size, dc_collate, partial=False),
+        batch_size=None,
+        shuffle=False,
+        num_workers=config.num_workers,
+        pin_memory=config.pin_memory,
+        persistent_workers=config.num_workers > 0,
+        worker_init_fn=init_fn)
+
+    train_nbatches = max(1, train_len // (config.batch_size * 1))
+    data_loader_train = (data_loader_train.with_epoch(train_nbatches).with_length(train_nbatches))
+
+    data_loader_val = wds.WebLoader(
+        dataset_val.batched(config.batch_size, dc_collate),
+        batch_size=None,
+        shuffle=False,
+        num_workers=config.num_workers,
+        pin_memory=config.pin_memory,
+        persistent_workers=config.num_workers > 0,
+        worker_init_fn=init_fn)
+
+    val_len = len(dataset_val)
+    val_nbatches = max(1, val_len // (config.batch_size * 1))
+    data_loader_val = (data_loader_val.with_epoch(val_nbatches).with_length(val_nbatches))
+
+    return dataset_train, dataset_val, data_loader_train, data_loader_val
+
+
 def warn_and_continue(exn):
     """Call in an exception handler to ignore any exception, issue a warning,
     and continue."""
@@ -139,7 +175,6 @@ def build_dataset(is_train, config):
             .decode('pil', handler=warn_and_continue)
             .rename(image='jpg;png;jpeg', text='text;txt', keep=False, handler=warn_and_continue)
             .map_dict(image=img_transform, text=text_transform, handler=warn_and_continue)
-            #.slice(dist.get_rank(), total_length, dist.get_world_size())
             .with_length(total_length))
         print("dataset", type(dataset))
 
@@ -157,14 +192,6 @@ def build_dataset(is_train, config):
         # zero shot classification validation
         print("rank",dist.get_rank())
         print("ws",dist.get_world_size())
-        # dataset = wds.SimpleShardList(tar_file_list)
-        #     #  wds.shuffle(0),
-        #     #  wds.decode('pil', handler=warn_and_continue),
-        #     #  wds.rename(image='jpg;png;jpeg', target='cls', keep=False),
-        #     #  wds.map_dict(image=img_transform, target=ToDataContainer()),
-        #     #  wds.slice(dist.get_rank(), total_length, dist.get_world_size()))
-        
-        #dataset = wds.with_length(dataset,length=total_length)
         dataset = (  # noqa
             wds.WebDataset(tar_file_list, repeat=False, handler=warn_and_continue)
             .shuffle(0)
@@ -178,7 +205,69 @@ def build_dataset(is_train, config):
 
     return dataset
 
+def build_dataset_sync(is_train, config):
+    img_transform = build_img_transform(is_train, config.img_aug)
+    text_transform = build_text_transform(is_train, config.text_aug)
+    #print("is_train",is_train)
+    split = 'train' if is_train else 'val'
+    dataset_type = None
+    tar_file_list = []
+    total_length = 0
+    for ds in config.dataset[split]:
+        #print("current dataset:",ds)
+        ds_meta = config.dataset.meta[ds]
+        if dataset_type is None:
+            dataset_type = ds_meta.type
+        else:
+            assert dataset_type == ds_meta.type, \
+                'All datasets must be of the same type'
 
+        prefix = ds_meta.prefix
+        path = ds_meta.path
+        length = ds_meta.length
+        cur_tar_file_list = []
+        for tar_file in braceexpand(osp.join(path, prefix)):
+            if osp.exists(tar_file):
+                cur_tar_file_list.append(tar_file)
+        print(f'Found {len(cur_tar_file_list)} files for dataset {ds}')
+        tar_file_list.extend(cur_tar_file_list)
+        total_length += length
+    print(f'Found {len(tar_file_list)} files in total for split {split}')
+    # yapf: disable
+    if is_train:
+        dataset = (  # noqa
+            wds.WebDataset(tar_file_list, repeat=True, handler=warn_and_continue, shardshuffle=True)
+            .shuffle(config.shuffle_buffer, initial=600000 )
+            .decode('pil', handler=warn_and_continue)
+            .rename(image='jpg;png;jpeg', text='text;txt', keep=False, handler=warn_and_continue)
+            .map_dict(image=img_transform, text=text_transform, handler=warn_and_continue)
+            .with_length(total_length))
+        print("dataset", type(dataset))
+
+        # from PIL import Image 
+        # import PIL 
+        # from itertools import islice   
+        # for i,sample in enumerate(islice(dataset, 0, 64)):
+        #     for key, value in sample.items():
+        #         print("i:",i)
+        #         print(key, repr(value))
+        #         if key is 'image':
+        #             value.save(f'img_{i}.jpg')
+        #     print()
+    else:
+        # zero shot classification validation
+        dataset = (  # noqa
+            wds.WebDataset(tar_file_list, repeat=False, handler=warn_and_continue)
+            .shuffle(0)
+            .decode('pil', handler=warn_and_continue)
+            .rename(image='jpg;png;jpeg', target='cls', keep=False)
+            .map_dict(image=img_transform, target=ToDataContainer())
+            .slice(0, total_length, 0)
+            .with_length(total_length))
+        print(":dataset type", type(dataset))
+    # yapf: enable
+
+    return dataset
 def build_img_transform(is_train, config, with_dc=True):
 
     if not config.deit_aug:
@@ -235,7 +324,9 @@ def build_text_transform(is_train, config, with_dc=True):
         transform = WordAugTokenizeWrapper(
             Tokenize(SimpleTokenizer(), max_seq_len=config.max_seq_len),
             max_word=config.multi_label,
-            word_type=config.word_type)
+            word_type=config.word_type,
+            pre_computed_nouns=config.pre_generated_nouns,
+            generate_prompt_for_np=config.generate_prompt_for_np)
 
     else:
         transform = Tokenize(SimpleTokenizer(), max_seq_len=config.max_seq_len)
@@ -281,7 +372,8 @@ class Tokenize:
 
 class WordAugTokenizeWrapper:
 
-    def __init__(self, tokenize, max_word=3, template_set='full', word_type='noun'):
+    def __init__(self, tokenize, max_word=3, template_set='subset', word_type='noun', pre_computed_nouns=False,
+                  generate_prompt_for_np=True):
         self.tokenize = tokenize
         self.max_word = max_word
         from .imagenet_template import (full_imagenet_templates, sub_imagenet_template, simple_imagenet_template,
@@ -300,6 +392,20 @@ class WordAugTokenizeWrapper:
         self.templates = templates
         assert word_type in ['noun', 'noun_phrase']
         self.word_type = word_type
+        self.pre_computed_nouns = pre_computed_nouns
+        if self.pre_computed_nouns:
+            import pickle
+
+            # Specify the path of the pickle file
+            pickle_path = "/misc/lmbraid21/sharmaa/poc_captions/poc_extract_noun_coco2017.pickle"
+
+            # Open the file in read mode
+            with open(pickle_path, "rb") as f:
+                # Load the dictionary from the file
+                self.caption_nouns_dict = pickle.load(f)
+
+        self.generate_prompt_for_np = generate_prompt_for_np
+
 
     def get_tag(self, tokenized, tags):
         if not isinstance(tags, (list, tuple)):
@@ -343,19 +449,30 @@ class WordAugTokenizeWrapper:
     def __call__(self, text):
         assert isinstance(text, str)
         tokenized = nltk.word_tokenize(text)
+        
         nouns = []
-        if len(tokenized) > 0:
-            if self.word_type == 'noun':
-                nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP', 'VBG', 'VB', 'VBD', 'VBN', 'VBP', 'VBZ'])
-            elif self.word_type == 'noun_phrase':
-                nouns = self.get_noun_phrase(tokenized)
-            else:
-                raise ValueError('word_type must be noun or noun_phrase')
+        if self.pre_computed_nouns and self.caption_nouns_dict:
+            nouns = self.caption_nouns_dict[text]
+        else:
+            if len(tokenized) > 0:
+                if self.word_type == 'noun':
+                    nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP']) #, 'VBG', 'VB', 'VBD', 'VBN', 'VBP', 'VBZ'])
+                elif self.word_type == 'noun_phrase':
+                    nouns = list(set(self.get_noun_phrase(tokenized) + self.get_tag(tokenized, ['NN', 'NNS', 'NNP'])))
+                    
+                # elif self.word_type == 'both':
+                #     nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP'])
+                #     noun_phrases = self.get_noun_phrase(tokenized)
+                else:
+                    raise ValueError('word_type must be noun or noun_phrase')
 
         prompt_texts = []
         if len(nouns) > 0:
             select_nouns = np.random.choice(nouns, min(self.max_word, len(nouns)), replace=False)
-            prompt_texts = [np.random.choice(self.templates).format(noun) for noun in select_nouns]
+            if not self.generate_prompt_for_np:
+                prompt_texts = [np.random.choice(self.templates).format(noun) if len(noun.split()) == 1 else noun for noun in select_nouns]
+            else:
+                prompt_texts = [np.random.choice(self.templates).format(noun) for noun in select_nouns]
         if len(prompt_texts) < self.max_word:
             prompt_texts += [text] * (self.max_word - len(prompt_texts))
 

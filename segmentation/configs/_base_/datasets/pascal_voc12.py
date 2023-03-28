@@ -11,7 +11,7 @@
 _base_ = ['../custom_import.py']
 # dataset settings
 dataset_type = 'PascalVOCDataset'
-data_root = 'local_data/VOCdevkit/VOC2012'
+data_root = '/misc/lmbraid21/sharmaa/VOCdevkit/VOC2012'
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 test_pipeline = [
     dict(type='LoadImageFromFile'),

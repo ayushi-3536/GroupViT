@@ -1,7 +1,7 @@
 data:
   batch_size: 128
   pin_memory: true
-  num_workers: 4
+  num_workers: 2
   # Thomas said it should be at least about 5-10x your batch size; beyond that,
   # the differences become academic.
   shuffle_buffer: 10000
@@ -30,14 +30,14 @@ data:
         length: 11866987
       imagenet:
         type: img_cls_pair
-        path: /misc/student/sharmaa/imagenet/shards
+        path: /misc/lmbraid21/sharmaa/imagenet/shards
         prefix: imagenet-val-{000000..000006}.tar
         length: 50000
       coco_train:
         type: img_txt_pair
-        path: /misc/student/sharmaa/train_coco/mscoco1
+        path: /misc/lmbraid21/sharmaa/train_coco/mscoco1
         prefix: train_coco_{000000..000059}.tar
-        length: 60
+        length: 600000
 
 
     train:
@@ -61,16 +61,19 @@ data:
   text_aug:
     max_seq_len: 77
     multi_label: 0
-    word_type: 'noun'
+    #word type could be noun, noun phrase or both
+    word_type: 'noun_phrase'
 
 train:
   start_epoch: 0
   epochs: 30
-  warmup_epochs: 2
+  warmup_epochs: 1
   base_lr: 1.6e-3
   weight_decay: 0.05
   warmup_lr: 4e-6
   min_lr: 4e-5
+  lr_scaling: 0.01 # GroupVIT linearly scales the learning rate.
+  #If this field is set, default scaling will be replaced by scaling with this unit
   clip_grad: 5.0
   accumulation_steps: 0
   amp_opt_level: O1
@@ -78,17 +81,25 @@ train:
 
   lr_scheduler:
     name: cosine
+    t_mul: 1
+    cycle_limit: 2
+    decay_epochs: 12
+
+  finetune:
+    only_grouping: true
+    freeze_text_encoder: false
 
   optimizer:
     name: adamw
     eps: 1e-8
     betas: [0.9, 0.999]
 
+
 evaluate:
   eval_only: false
   eval_freq: 1
   task:
-    - cls
+    #- cls
     - seg
   cls:
     save_best: true
@@ -96,6 +107,8 @@ evaluate:
   seg:
     save_best: true
     cfg: segmentation/configs/_base_/datasets/coco.py
+    #cfg: segmentation/configs/_base_/datasets/pascal_context.py
+    #cfg: segmentation/configs/_base_/datasets/pascal_voc12.py
     template: simple
     opts: []
 
@@ -105,13 +118,15 @@ checkpoint:
   freq: 1
   max_kept: -1
   save_freq: 1
+  key_mapper: '' #'/home/sharmaa/groupvit/GroupViT/configs/key_mapper_gs3.yml'
 
 
 model_name: '' # display name in the logger
 output: ???
+wandb_output: '/misc/lmbraid21/sharmaa/wandb'
 tag: default
 print_freq: 1
 seed: 0
-wandb: false
+wandb: true
 local_rank: ???
 vis: []

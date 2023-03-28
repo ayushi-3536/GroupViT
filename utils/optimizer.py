@@ -27,11 +27,48 @@
 # -------------------------------------------------------------------------
 
 from torch import optim as optim
+from utils import get_logger
 
+def check_items_in_string(items, key):
+    for item in items:
+        if item in key:
+            return True
+    return False
+
+def set_gradient(model, cfg):
+    #logger = get_logger()
+    text_encoder_keys = ['text_encoder', 'text_projector']
+    #Cross Attention module is added to take the cross attention between the group tokens
+    #and text token before projecting group tokens into the multi-modal space 
+    grouping_layer_key = ['.downsample', 'cross_attention.']
+    for name, param in model.named_parameters():
+        #logger.info(f'key: {name}')
+        if not param.requires_grad:
+            continue  # frozen weights
+        if cfg.only_grouping:
+            if not check_items_in_string(grouping_layer_key, name):
+                param.requires_grad=False
+        elif cfg.freeze_text_encoder:
+            if check_items_in_string(text_encoder_keys, name):
+                #logger.info(f'setting {name} as untrainable')
+                param.requires_grad=False
+    return model
 
 def build_optimizer(config, model):
     """Build optimizer, set weight decay of normalization to 0 by default."""
+    
+    #logger = get_logger('optimizer')
+    if config.finetune.only_grouping or config.finetune.freeze_text_encoder:
+        #logger.info('Setting untrainable parameters')
+        model = set_gradient(model, config.finetune)
+
     parameters = set_weight_decay(model, {}, {})
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    #logger.info(f'Number of trainable parameters: {trainable_params}/{sum(p.numel() for p in model.parameters())}')
+
+    # for name, param in model.named_parameters():
+    #     if not param.requires_grad:
+    #         logger.debug(f'name::{name}')
 
     opt_name = config.optimizer.name
     optimizer = None

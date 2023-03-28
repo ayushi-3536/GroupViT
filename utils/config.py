@@ -10,13 +10,12 @@
 
 import os
 import os.path as osp
-
 from omegaconf import OmegaConf
 
 
-def load_config(cfg_file):
+def load_config(cfg_file, merge_base=True):
     cfg = OmegaConf.load(cfg_file)
-    if '_base_' in cfg:
+    if '_base_' in cfg and merge_base:
         if isinstance(cfg._base_, str):
             base_cfg = OmegaConf.load(osp.join(osp.dirname(cfg_file), cfg._base_))
         else:

@@ -48,12 +48,13 @@ from segmentation.evaluation import build_seg_dataloader, build_seg_dataset, bui
 from timm.utils import AverageMeter, accuracy
 from utils import (auto_resume_helper, build_dataset_class_tokens, build_optimizer, build_scheduler, data2cuda,
                    get_config, get_grad_norm, get_logger, load_checkpoint, parse_losses, reduce_tensor, save_checkpoint)
-
 try:
     # noinspection PyUnresolvedReferences
     from apex import amp
 except ImportError:
     amp = None
+
+
 
 
 def parse_args():
@@ -85,32 +86,142 @@ def parse_args():
 
     return args
 
+def log_tensorboard_graph(data_loader_train, model, cfg):
+    import copy
+    from einops import rearrange
+    from torch.utils.tensorboard import SummaryWriter
+    
+    logger = get_logger()
+
+    # default `log_dir` is "runs" - we'll be more specific here
+    writer = SummaryWriter(cfg.output)
+
+    data_loader = copy.deepcopy(data_loader_train)
+    dataiter = iter(data_loader)
+    samples = next(dataiter)
+        
+    img_model = copy.deepcopy(model.module.img_encoder).cuda()
+    
+    text_model = copy.deepcopy(model.module.text_encoder).cuda()
+    # single_sample = torch.unsqueeze(torch.unsqueeze(samples['image'].data[0][0][0], dim=0), dim=0)
+    # logger.info('single sample', single_sample)
+    
+    # logger.info('shape single sample', single_sample.shape)
+    #img_sample_data = single_sample.cuda()
+    img_sample_data = samples['image'].data[0].cuda()
+    img_sample_data.requires_grad = False
+    text_sample_data = samples['text'].data[0].cuda()
+    assert text_sample_data.ndim in [2, 3], text_sample_data.ndim
+    squeeze_dim = False
+    num_text = 1
+    if text_sample_data.ndim == 3:
+        num_text = text_sample_data.shape[1]
+        text_sample_data = rearrange(text_sample_data, 'b n l -> (b n) l', n=num_text)
+        squeeze_dim = True
+    logger.info('text sample data', text_sample_data.shape)
+    text_sample_data.requires_grad = False
+    for para in img_model.parameters():
+        para.required_grad = False
+    for para in text_model.parameters():
+        para.required_grad = False
+    img_model.eval()
+    text_model.eval()
+    x = torch.rand((1,3,16,16)).cuda()
+
+    text_input = torch.rand((1, 4, 77)).to(torch.int64).cuda()
+    with amp.disable_casts():
+        writer.add_graph(img_model, x)#img_sample_data.detach())
+        writer.add_graph(text_model, text_sample_data)#text_input)
+    writer.close()
+
+def write_model_iteration(cfg, data_loader_train, model):
+    #To track tensorboard model graph
+    #log_tensorboard_graph()
+    import copy
+    from einops import rearrange
+    from torch.utils.tensorboard import SummaryWriter
+    
+    logger = get_logger()
+    writer = SummaryWriter(cfg.output)
+    data_loader = copy.deepcopy(data_loader_train)
+    dataiter = iter(data_loader)
+    samples = next(dataiter)
+        
+    img_model = copy.deepcopy(model.module.img_encoder).cuda()
+    
+    text_model = copy.deepcopy(model.module.text_encoder).cuda()
+    # single_sample = torch.unsqueeze(torch.unsqueeze(samples['image'].data[0][0][0], dim=0), dim=0)
+    # logger.info('single sample', single_sample)
+    
+    # logger.info('shape single sample', single_sample.shape)
+    #img_sample_data = single_sample.cuda()
+    img_sample_data = samples['image'].data[0].cuda()
+    img_sample_data.requires_grad = False
+    text_sample_data = torch.rand((1, 4, 77)).to(torch.int64).cuda()# samples['text'].data[0].cuda()
+    assert text_sample_data.ndim in [2, 3], text_sample_data.ndim
+    squeeze_dim = False
+    num_text = 1
+    if text_sample_data.ndim == 3:
+        num_text = text_sample_data.shape[1]
+        text_sample_data = rearrange(text_sample_data, 'b n l -> (b n) l', n=num_text)
+        squeeze_dim = True
+    logger.info('text sample data', text_sample_data.shape)
+    text_sample_data.requires_grad = False
+    for para in img_model.parameters():
+        para.required_grad = False
+    for para in text_model.parameters():
+        para.required_grad = False
+    img_model.eval()
+    text_model.eval()
+    x = torch.rand((1,3,16,16)).cuda()
+
+
+    text_input = torch.rand((1, 4, 77)).to(torch.int64).cuda()
+    assert text_input.ndim in [2, 3], text_input.ndim
+    squeeze_dim = False
+    num_text = 1
+    if text_input.ndim == 3:
+        num_text = text_input.shape[1]
+        text_input = rearrange(text_input, 'b n l -> (b n) l', n=num_text)
+        squeeze_dim = True
+    
+    logger.info('text sample data', text_input)
+    
+    #writer.add_graph(text_model, text_input)#text_input)
+    with amp.disable_casts():
+        writer.add_graph(img_model, x)#img_sample_data.detach())
+    writer.close()
+
+
 
 def train(cfg):
-    
     logger = get_logger()
     if cfg.wandb and dist.get_rank() == 0:
         import wandb
         wandb.init(
+            #id='e6h1oyjs',
             project='group_vit',
+            sync_tensorboard=True,
             name=osp.join(cfg.model_name, cfg.tag),
-            dir=cfg.output,
+            dir=cfg.output,#wandb_output,
             config=OmegaConf.to_container(cfg, resolve=True),
-            resume=cfg.checkpoint.auto_resume)
+            #resume='must'
+        )
     else:
         wandb = None
     # waiting wandb init
     dist.barrier()
     dataset_train, dataset_val, \
         data_loader_train, data_loader_val = build_loader(cfg.data)
-    
-    logger.info(f"dataset traibn:{dataset_train}")
     data_loader_seg = build_seg_dataloader(build_seg_dataset(cfg.evaluate.seg))
-
 
     logger.info(f'Creating model:{cfg.model.type}/{cfg.model_name}')
     model = build_model(cfg.model)
     model.cuda()
+
+    if cfg.wandb and dist.get_rank() == 0:
+        wandb.watch(model, log="all")
+        
     #logger.info(str(model))
 
     optimizer = build_optimizer(cfg.train, model)
@@ -146,15 +257,32 @@ def train(cfg):
         if 'seg' in cfg.evaluate.task:
             miou = validate_seg(cfg, data_loader_seg, model)
             logger.info(f'mIoU of the network on the {len(data_loader_seg.dataset)} test images: {miou:.2f}%')
+            if wandb is not None:
+                log_stat = {}
+                log_stat.update({
+                    'epoch/val_miou': miou,
+                    'epoch/epoch': -1,
+                    'epoch/n_parameters': n_parameters
+                })
+                wandb.log(log_stat)
+
         if cfg.evaluate.eval_only:
             return
 
+
+    write_model_iteration(cfg, data_loader_train, model)
+
+    
     logger.info('Start training')
     start_time = time.time()
+
+    #default `log_dir` is "runs" - we'll be more specific here
+    
     for epoch in range(cfg.train.start_epoch, cfg.train.epochs):
-        
+        # import ipdb
+        # ipdb.set_trace()
         torch.cuda.empty_cache()
-        print("epoch",epoch)
+        logger.debug(f'epoch:{epoch}')
         loss_train_dict = train_one_epoch(cfg, model, data_loader_train, optimizer, epoch, lr_scheduler)
         if dist.get_rank() == 0 and (epoch % cfg.checkpoint.save_freq == 0 or epoch == (cfg.train.epochs - 1)):
             save_checkpoint(cfg, epoch, model_without_ddp, {
@@ -191,9 +319,6 @@ def train(cfg):
         if wandb is not None:
             log_stat = {f'epoch/train_{k}': v for k, v in loss_train_dict.items()}
             log_stat.update({
-                'epoch/val_acc1': acc1,
-                'epoch/val_acc5': acc5,
-                'epoch/val_loss': loss,
                 'epoch/val_miou': miou,
                 'epoch/epoch': epoch,
                 'epoch/n_parameters': n_parameters
@@ -224,6 +349,9 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
     start = time.time()
     end = time.time()
+    #getting some random training images for tensorboard
+    
+
     for idx, samples in enumerate(data_loader):
 
         logger.info(f'idx:{idx}')
@@ -456,9 +584,15 @@ def main():
     logger = get_logger(cfg)
 
     # linear scale the learning rate according to total batch size, may not be optimal
-    linear_scaled_lr = cfg.train.base_lr * cfg.data.batch_size * world_size / 4096.0
-    linear_scaled_warmup_lr = cfg.train.warmup_lr * cfg.data.batch_size * world_size / 4096.0
-    linear_scaled_min_lr = cfg.train.min_lr * cfg.data.batch_size * world_size / 4096.0
+    if cfg.train.lr_scaling > 0:
+        linear_scaled_lr = cfg.train.base_lr * cfg.train.lr_scaling  #0.25 #cfg.data.batch_size * world_size / 4096.0
+        linear_scaled_warmup_lr = cfg.train.warmup_lr * cfg.train.lr_scaling #0.01 #0.25 # cfg.data.batch_size * world_size / 4096.0
+        linear_scaled_min_lr = cfg.train.min_lr * cfg.train.lr_scaling #0.25 # cfg.data.batch_size * world_size / 4096.0
+    else:
+        linear_scaled_lr = cfg.train.base_lr * cfg.data.batch_size * world_size / 4096.0
+        linear_scaled_warmup_lr = cfg.train.warmup_lr * cfg.data.batch_size * world_size / 4096.0
+        linear_scaled_min_lr = cfg.train.min_lr * cfg.data.batch_size * world_size / 4096.0
+
 
     # gradient accumulation also need to scale the learning rate
     if cfg.train.accumulation_steps > 1:

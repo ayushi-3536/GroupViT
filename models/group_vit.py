@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-
+from utils import get_logger
 from .builder import MODELS
 from .misc import Result, interpolate_pos_encoding
 
@@ -769,7 +769,9 @@ class GroupViT(nn.Module):
 
         self.apply(self._init_weights)
 
-    def load_state_dict(self, state_dict: 'OrderedDict[str, torch.Tensor]', strict: bool = True):
+    def load_state_dict(self, state_dict: 'OrderedDict[str, torch.Tensor]', strict: bool = True, finetune: bool = True):
+        print("groupvit load state dict")
+
         if self.pos_embed_type == 'simple' and 'pos_embed' in state_dict:
             load_pos_embed = state_dict['pos_embed']
             pos_embed = self.pos_embed
@@ -785,6 +787,27 @@ class GroupViT(nn.Module):
                     align_corners=False)
                 load_pos_embed = rearrange(load_pos_embed, 'b c h w -> b (h w) c', h=H_new, w=W_new)
                 state_dict['pos_embed'] = load_pos_embed
+        print("state dict",state_dict)
+        # if finetune and 'img_encoder.layers.2.group_token' in state_dict:
+        #     print("inside ft")
+        #     load_group_token_layer2 = state_dict['img_encoder.layers.2.group_token']
+        #     model_group_token = self.layers[2].group_token
+        #     print("loaded gt shape", model_group_token.shape)
+            
+        #     print("model gt shape",load_group_token_layer2.shape)
+
+        #     # if load_group_token_layer2.shape != model_group_token.shape:
+        #     #     H_new = int(self.patch_embed.num_patches**0.5)
+        #     #     W_new = H_new
+        #     #     H_ori = int(load_pos_embed.shape[1]**0.5)
+        #     #     W_ori = H_ori
+        #     #     load_pos_embed = F.interpolate(
+        #     #         rearrange(load_pos_embed, 'b (h w) c -> b c h w', h=H_ori, w=W_ori, b=1),
+        #     #         size=(H_new, W_new),
+        #     #         mode='bicubic',
+        #     #         align_corners=False)
+        #     #     load_pos_embed = rearrange(load_pos_embed, 'b c h w -> b (h w) c', h=H_new, w=W_new)
+        #     #     state_dict['pos_embed'] = load_pos_embed    
         return super().load_state_dict(state_dict, strict)
 
     def build_simple_position_embedding(self):

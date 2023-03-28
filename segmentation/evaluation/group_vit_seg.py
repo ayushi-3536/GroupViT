@@ -119,11 +119,12 @@ def seg2coord(seg_map):
 
 class GroupViTSegInference(EncoderDecoder):
 
-    def __init__(self, model, text_embedding, with_bg, test_cfg=dict(mode='whole', bg_thresh=.95)):
+    def __init__(self, model, text_embedding, with_bg, test_cfg=dict(mode='whole', bg_thresh=.99)):
         super(EncoderDecoder, self).__init__()
         if not isinstance(test_cfg, mmcv.Config):
             test_cfg = mmcv.Config(test_cfg)
         self.test_cfg = test_cfg
+        
         self.model = model
         # [N, C]
         self.register_buffer('text_embedding', text_embedding)
@@ -134,9 +135,9 @@ class GroupViTSegInference(EncoderDecoder):
         else:
             self.num_classes = len(text_embedding)
         self.align_corners = False
-        logger = get_logger()
-        logger.info(
-            f'Building GroupViTSegInference with {self.num_classes} classes, test_cfg={test_cfg}, with_bg={with_bg}')
+        ##logger = get_logger()
+        #logger.info(
+        #    f'Building GroupViTSegInference with {self.num_classes} classes, test_cfg={test_cfg}, with_bg={with_bg}')
 
     def forward_train(self, img, img_metas, gt_semantic_seg):
         raise NotImplementedError
@@ -149,6 +150,7 @@ class GroupViTSegInference(EncoderDecoder):
         Returns:
             attn_maps: list[Tensor], attention map of shape [B, H, W, groups]
         """
+        #logger = get_logger()
         results = self.model.img_encoder(img, return_attn=True, as_dict=True)
 
         attn_maps = []
@@ -202,14 +204,6 @@ class GroupViTSegInference(EncoderDecoder):
         # [H, W, G], select batch idx 0
         attn_map = attn_map[0]
 
-        img_outs = self.model.encode_image(img, return_feat=True, as_dict=True)
-        # [B, L, C] -> [L, C]
-        grouped_img_tokens = img_outs['image_feat'].squeeze(0)
-        img_avg_feat = img_outs['image_x']
-        # [G, C]
-        grouped_img_tokens = F.normalize(grouped_img_tokens, dim=-1)
-        img_avg_feat = F.normalize(img_avg_feat, dim=-1)
-
         # [H, W, G]
         onehot_attn_map = F.one_hot(attn_map.argmax(dim=-1), num_classes=attn_map.shape[-1]).to(dtype=attn_map.dtype)
 
@@ -219,6 +213,18 @@ class GroupViTSegInference(EncoderDecoder):
         num_classes = num_fg_classes + class_offset
 
         logit_scale = torch.clamp(self.model.logit_scale.exp(), max=100)
+
+        img_outs = self.model.encode_image(img, return_feat=True, as_dict=True) #, cross_attn=False)
+        
+        # [B, L, C] -> [L, C]
+        grouped_img_tokens = img_outs['image_feat'].squeeze(0)
+
+        img_avg_feat = img_outs['image_x']
+        
+        # [G, C]
+        grouped_img_tokens = F.normalize(grouped_img_tokens, dim=-1)
+        img_avg_feat = F.normalize(img_avg_feat, dim=-1)
+
         # [G, N]
         group_affinity_mat = (grouped_img_tokens @ text_tokens.T) * logit_scale
         pre_group_affinity_mat = F.softmax(group_affinity_mat, dim=-1)
@@ -242,7 +248,10 @@ class GroupViTSegInference(EncoderDecoder):
         if self.with_bg:
             bg_thresh = min(self.bg_thresh, group_affinity_mat.max().item())
             pred_logits[0, (onehot_attn_map @ group_affinity_mat).max(dim=-1).values < bg_thresh] = 1
-
+        import numpy as np
+        #np.savetxt('PRED_LOGIT.txt', pred_logits.numpy())
+        print(pred_logits.unsqueeze(0))
+        #np.savetxt('PRED_LOGIT_UNSQUEEZE.txt', pred_logits.unsqueeze(0).numpy())
         return pred_logits.unsqueeze(0)
 
     def blend_result(self, img, result, palette=None, out_file=None, opacity=0.5, with_bg=False):
@@ -276,7 +285,8 @@ class GroupViTSegInference(EncoderDecoder):
     def show_result(self, img_show, img_tensor, result, out_file, vis_mode='input'):
 
         assert vis_mode in [
-            'input', 'pred', 'input_pred', 'all_groups', 'first_group', 'final_group', 'input_pred_label'
+            'input', 'pred', 'input_pred', 'all_groups', 'second_group', 'first_group',
+             'final_group', 'input_pred_label'
         ], vis_mode
 
         if vis_mode == 'input':
@@ -335,16 +345,18 @@ class GroupViTSegInference(EncoderDecoder):
             mmcv.imwrite(img, out_file)
             plt.close()
 
-        elif vis_mode == 'all_groups' or vis_mode == 'final_group' or vis_mode == 'first_group':
+        elif vis_mode == 'all_groups' or vis_mode == 'final_group' or vis_mode == 'first_group' or vis_mode == 'second_group':
             attn_map_list = self.get_attn_maps(img_tensor)
-            assert len(attn_map_list) in [1, 2]
+            assert len(attn_map_list) in [1, 2, 3]
             # only show 16 groups for the first stage
-            # if len(attn_map_list) == 2:
-            #     attn_map_list[0] = top_groups(attn_map_list[0], k=16)
+            # if len(attn_map_list) == 1:
+            #     attn_map_list[0] = top_groups(attn_map_list[0], k=5)
 
             num_groups = [attn_map_list[layer_idx].shape[-1] for layer_idx in range(len(attn_map_list))]
             for layer_idx, attn_map in enumerate(attn_map_list):
                 if vis_mode == 'first_group' and layer_idx != 0:
+                    continue
+                if vis_mode == 'second_group' and layer_idx != 1:
                     continue
                 if vis_mode == 'final_group' and layer_idx != len(attn_map_list) - 1:
                     continue

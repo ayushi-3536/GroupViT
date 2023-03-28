@@ -11,7 +11,6 @@
 import argparse
 import os
 import os.path as osp
-
 import mmcv
 import torch
 import torch.backends.cudnn as cudnn
@@ -167,7 +166,7 @@ def main():
     print("local rank",cfg.local_rank)
     torch.cuda.set_device(cfg.local_rank)
 
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+    dist.init_process_group(backend='nlcc', init_method='env://', world_size=world_size, rank=rank)
 
     dist.barrier()
 
