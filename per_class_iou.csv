@@ -1,0 +1,82 @@
+Class Name,IoU Score
+background,70.65
+person,13.13
+bicycle,29.43
+car,24.92
+motorcycle,60.45
+airplane,36.56
+bus,54.66
+train,36.07
+truck,22.64
+boat,22.2
+traffic light,11.9
+fire hydrant,52.94
+stop sign,31.27
+parking meter,25.03
+bench,23.81
+bird,35.11
+cat,64.3
+dog,48.4
+horse,51.06
+sheep,55.27
+cow,50.32
+elephant,66.81
+bear,43.13
+zebra,71.3
+giraffe,55.87
+backpack,6.77
+umbrella,37.66
+handbag,0.0
+tie,2.93
+suitcase,16.72
+frisbee,0.95
+skis,3.58
+snowboard,1.73
+sports ball,4.74
+kite,11.89
+baseball bat,2.12
+baseball glove,8.12
+skateboard,6.01
+surfboard,12.9
+tennis racket,10.52
+bottle,8.87
+wine glass,18.55
+cup,6.6
+fork,1.0
+knife,0.0
+spoon,2.21
+bowl,11.34
+banana,31.72
+apple,29.85
+sandwich,32.35
+orange,43.82
+broccoli,25.09
+carrot,28.67
+hot dog,17.31
+pizza,51.91
+donut,36.95
+cake,34.24
+chair,9.68
+couch,19.02
+potted plant,6.06
+bed,37.59
+dining table,2.73
+toilet,16.75
+tv,17.6
+laptop,24.48
+mouse,0.0
+remote,8.52
+keyboard,19.43
+cell phone,24.22
+microwave,5.3
+oven,15.76
+toaster,17.59
+sink,14.58
+refrigerator,19.15
+book,19.09
+clock,21.43
+vase,14.97
+scissors,18.91
+teddy bear,56.2
+hair drier,0.03
+toothbrush,13.09
