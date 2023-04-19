@@ -214,7 +214,7 @@ def save_checkpoint(config, epoch, model, metrics, optimizer, lr_scheduler, suff
 
     if len(suffix) > 0 and not suffix.startswith('_'):
         suffix = '_' + suffix
-    filename = f'ckpt_epoch_{epoch}{suffix}.pth'
+    filename = f'ckpt_epoch{suffix}.pth'
 
     save_path = os.path.join(config.output, filename)
     logger.info(f'{save_path} saving......')

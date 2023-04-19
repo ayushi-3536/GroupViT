@@ -1,4 +1,4 @@
-# -------------------------------------------------------------------------
+66666# -------------------------------------------------------------------------
 # Copyright (c) 2021-2022, NVIDIA Corporation & Affiliates. All rights reserved.
 #
 # This work is made available under the Nvidia Source Code License.
@@ -149,18 +149,15 @@ class MultiLabelContrastive(nn.Module):
     def loss_sync(self, image_x, text_x):
 
         batch_size = image_x.shape[0]
-        #print("current batch size", batch_size)
+        
         # get label globally
         labels = torch.arange(batch_size, dtype=torch.long, device=image_x.device) + batch_size * 0 #dist.get_rank()
-        #print("labels",labels)
         # [B, C]
         image_x = F.normalize(image_x, dim=-1)
         text_x = F.normalize(text_x, dim=-1)
 
         logits_per_img = image_x @ text_x.t()
         logits_per_text = text_x @ image_x.t()
-        # print("logits per image", logits_per_img.shape)
-        # print("logits per text", logits_per_text.shape)
 
         logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
         loss_img = self.cross_entropy(logits_per_img * logit_scale, labels)

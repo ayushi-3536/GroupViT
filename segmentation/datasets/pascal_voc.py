@@ -15,5 +15,24 @@ from mmseg.datasets import PascalVOCDataset as _PascalVOCDataset
 @DATASETS.register_module(force=True)
 class PascalVOCDataset(_PascalVOCDataset):
 
-    CLASSES = ('background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
-               'table', 'dog', 'horse', 'motorbike', 'person', 'plant', 'sheep', 'sofa', 'train', 'monitor')
+    CLASSES = ('background',
+                'aeroplane', 
+                'bicycle',
+                'bird',
+                'boat',
+                'bottle', 
+                'bus', 
+                'car', 
+                'cat', 
+                'chair', 
+                'cow',
+                'table', 
+                'dog', 
+                'horse', 
+                'motorbike', 
+                'person', 
+                'plant', 
+                'sheep', 
+                'sofa', 
+                'train', 
+                'monitor')

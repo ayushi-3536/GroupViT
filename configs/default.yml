@@ -1,7 +1,7 @@
 data:
-  batch_size: 128
+  batch_size: 1
   pin_memory: true
-  num_workers: 2
+  num_workers: 1
   # Thomas said it should be at least about 5-10x your batch size; beyond that,
   # the differences become academic.
   shuffle_buffer: 10000
@@ -60,10 +60,19 @@ data:
     re_count: 1
   text_aug:
     max_seq_len: 77
-    multi_label: 0
+    multi_label: 3
     #word type could be noun, noun phrase or both
     word_type: 'noun_phrase'
-
+    pre_generated_nouns: false
+    #if not set then true
+    generate_prompt: false
+    #generate prompt would trump generate_prompt_for_np. Only if generate_prompt 
+    #is true generate_prompt_for_np would be considered
+    generate_prompt_for_np: true
+    #if not set then true
+    with_caption: false
+    #if not set then always true
+    max_length_fixed: true
 train:
   start_epoch: 0
   epochs: 30
@@ -106,9 +115,9 @@ evaluate:
     template: subset
   seg:
     save_best: true
-    cfg: segmentation/configs/_base_/datasets/coco.py
+    #cfg: segmentation/configs/_base_/datasets/coco.py
+    cfg: segmentation/configs/_base_/datasets/pascal_voc12.py
     #cfg: segmentation/configs/_base_/datasets/pascal_context.py
-    #cfg: segmentation/configs/_base_/datasets/pascal_voc12.py
     template: simple
     opts: []
 

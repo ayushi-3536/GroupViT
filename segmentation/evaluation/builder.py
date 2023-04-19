@@ -60,6 +60,8 @@ def build_seg_inference(model, dataset, text_transform, config):
     return seg_model
 
 
+
+
 class LoadImage:
     """A simple pipeline to load image."""
 
@@ -86,12 +88,58 @@ class LoadImage:
         results['ori_shape'] = img.shape
         return results
 
+class LoadTrainImage:
+    """A simple pipeline to load image."""
+
+    def __call__(self, results):
+        """Call function to load images into results.
+
+        Args:
+            results (dict): A result dict contains the file name
+                of the image to be read.
+
+        Returns:
+            dict: ``results`` will be returned containing loaded image.
+        """
+
+        if isinstance(results['img'], str):
+            results['filename'] = results['img']
+            results['ori_filename'] = results['img']
+        else:
+            results['filename'] = None
+            results['ori_filename'] = None
+        #img = mmcv.imread(results['img'])
+        img = results['img'][0].numpy()
+        results['img'] = img
+        results['img_shape'] = img.shape
+        results['ori_shape'] = img.shape
+        return results
+
 
 def build_seg_demo_pipeline():
     """Build a demo pipeline from config."""
     img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
     test_pipeline = Compose([
         LoadImage(),
+        dict(
+            type='MultiScaleFlipAug',
+            img_scale=(2048, 448),
+            flip=False,
+            transforms=[
+                dict(type='Resize', keep_ratio=True),
+                dict(type='RandomFlip'),
+                dict(type='Normalize', **img_norm_cfg),
+                dict(type='ImageToTensor', keys=['img']),
+                dict(type='Collect', keys=['img']),
+            ])
+    ])
+    return test_pipeline
+
+def build_train_assessment_pipeline():
+    """Build a demo pipeline from config."""
+    img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+    test_pipeline = Compose([
+        LoadTrainImage(),
         dict(
             type='MultiScaleFlipAug',
             img_scale=(2048, 448),

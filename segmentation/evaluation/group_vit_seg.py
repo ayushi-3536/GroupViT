@@ -13,15 +13,94 @@ import os.path as osp
 import matplotlib.pyplot as plt
 import mmcv
 import numpy as np
+
+import os
 import torch
 import torch.nn.functional as F
 from einops import rearrange
 from mmseg.models import EncoderDecoder
 from PIL import Image
 from utils import get_logger
+import os
+import sys
+import argparse
+import cv2
+import random
+import colorsys
+import requests
+from io import BytesIO
+import skimage.io
+from skimage.measure import find_contours
+import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
+import torch
+import torch.nn as nn
+import torchvision
+from torchvision import transforms as pth_transforms
+import numpy as np
+from PIL import Image
+import utils
 
 GROUP_PALETTE = np.loadtxt(osp.join(osp.dirname(osp.abspath(__file__)), 'group_palette.txt'), dtype=np.uint8)[:, ::-1]
 
+def apply_mask(image, mask, color, alpha=0.5):
+    for c in range(3):
+        image[:, :, c] = image[:, :, c] * (1 - alpha * mask) + alpha * mask * color[c] * 255
+    return image
+
+
+def random_colors(N, bright=True):
+    """
+    Generate random colors.
+    """
+    brightness = 1.0 if bright else 0.7
+    hsv = [(i / N, 1, brightness) for i in range(N)]
+    colors = list(map(lambda c: colorsys.hsv_to_rgb(*c), hsv))
+    random.shuffle(colors)
+    return colors
+
+
+def display_instances(image, mask, fname="test", figsize=(5, 5), blur=False, contour=False, alpha=0.5):
+    fig = plt.figure(figsize=figsize, frameon=False)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    fig.add_axes(ax)
+    ax = plt.gca()
+
+    N = 1
+    mask = mask[None, :, :]
+    # Generate random colors
+    colors = random_colors(N)
+
+    # Show area outside image boundaries.
+    height, width = image.shape[:2]
+    margin = 0
+    ax.set_ylim(height + margin, -margin)
+    ax.set_xlim(-margin, width + margin)
+    ax.axis('off')
+    masked_image = image.astype(np.uint32).copy()
+    for i in range(N):
+        color = colors[i]
+        _mask = mask[i]
+        if blur:
+            _mask = cv2.blur(_mask,(10,10))
+        # Mask
+        masked_image = apply_mask(masked_image, _mask, color, alpha)
+        # Mask Polygon
+        # Pad to ensure proper polygons for masks that touch image edges.
+        if contour:
+            padded_mask = np.zeros((_mask.shape[0] + 2, _mask.shape[1] + 2))
+            padded_mask[1:-1, 1:-1] = _mask
+            contours = find_contours(padded_mask, 0.5)
+            for verts in contours:
+                # Subtract the padding and flip (y, x) to (x, y)
+                verts = np.fliplr(verts) - 1
+                p = Polygon(verts, facecolor="none", edgecolor=color)
+                ax.add_patch(p)
+    ax.imshow(masked_image.astype(np.uint8), aspect='auto')
+    fig.savefig(fname)
+    print(f"{fname} saved.")
+    return
 
 def resize_attn_map(attentions, h, w, align_corners=False):
     """
@@ -119,7 +198,7 @@ def seg2coord(seg_map):
 
 class GroupViTSegInference(EncoderDecoder):
 
-    def __init__(self, model, text_embedding, with_bg, test_cfg=dict(mode='whole', bg_thresh=.99)):
+    def __init__(self, model, text_embedding, with_bg, test_cfg=dict(mode='whole', bg_thresh=.1)):
         super(EncoderDecoder, self).__init__()
         if not isinstance(test_cfg, mmcv.Config):
             test_cfg = mmcv.Config(test_cfg)
@@ -135,6 +214,7 @@ class GroupViTSegInference(EncoderDecoder):
         else:
             self.num_classes = len(text_embedding)
         self.align_corners = False
+        self.output_dir=''
         ##logger = get_logger()
         #logger.info(
         #    f'Building GroupViTSegInference with {self.num_classes} classes, test_cfg={test_cfg}, with_bg={with_bg}')
@@ -203,9 +283,32 @@ class GroupViTSegInference(EncoderDecoder):
         attn_map = self.get_attn_maps(img, rescale=True)[-1]
         # [H, W, G], select batch idx 0
         attn_map = attn_map[0]
-
+        attn_map_results_path = osp.join(self.output_dir, 'attn_map')
+        mmcv.mkdir_or_exist(attn_map_results_path)
+        attn_map_results_path = osp.join(attn_map_results_path,'attn_map{}.png')
+        attn_maps = attn_map.detach().cpu().numpy()
+        for i in range(attn_maps.shape[-1]):
+            fig, ax = plt.subplots()
+            if np.any(attn_maps[:, :, i] != 0):
+                im = ax.imshow(attn_maps[:, :, i], cmap='viridis')
+                cbar = ax.figure.colorbar(im, ax=ax)
+                ax.set_title('Group {}'.format(i))
+                plt.savefig(attn_map_results_path.format(i))
+                plt.close()
         # [H, W, G]
         onehot_attn_map = F.one_hot(attn_map.argmax(dim=-1), num_classes=attn_map.shape[-1]).to(dtype=attn_map.dtype)
+        onehot_attn_map_path = osp.join(self.output_dir, 'one_hot_attn')
+        mmcv.mkdir_or_exist(onehot_attn_map_path)
+        onehot_attn_map_path = osp.join(onehot_attn_map_path, 'onehot_attn_map{}.png')
+        onehot_attn_maps = onehot_attn_map.detach().cpu().numpy()
+        for i in range(onehot_attn_maps.shape[-1]):
+            fig, ax = plt.subplots()
+            if np.any(onehot_attn_maps[:, :, i] != 0):
+                im = ax.imshow(onehot_attn_maps[:, :, i], cmap='viridis')
+                cbar = ax.figure.colorbar(im, ax=ax)
+                ax.set_title('Group {}'.format(i))
+                plt.savefig(onehot_attn_map_path.format(i))
+                plt.close()
 
         num_fg_classes = self.text_embedding.shape[0]
         class_offset = 1 if self.with_bg else 0
@@ -228,9 +331,37 @@ class GroupViTSegInference(EncoderDecoder):
         # [G, N]
         group_affinity_mat = (grouped_img_tokens @ text_tokens.T) * logit_scale
         pre_group_affinity_mat = F.softmax(group_affinity_mat, dim=-1)
+        group_text_affinity_metric_path = osp.join(self.output_dir, 'group_text_affinity_metric.png')
+        pre_group_text_affinity_metric_path = osp.join(self.output_dir, 'pre_group_text_affinity_metric.png')
+
+        group_affinity_mat_cpu = group_affinity_mat.detach().cpu().numpy()
+        fig, ax = plt.subplots()
+        im = ax.imshow(group_affinity_mat_cpu, cmap='viridis')
+        cbar = ax.figure.colorbar(im, ax=ax)
+        ax.set_title('Visual_Text Token Affinity')
+        plt.savefig(group_text_affinity_metric_path)
+        plt.close()
+
+        pre_group_affinity_mat_cpu = pre_group_affinity_mat.detach().cpu().numpy()
+        fig, ax = plt.subplots()
+        im = ax.imshow(pre_group_affinity_mat_cpu, cmap='viridis')
+        cbar = ax.figure.colorbar(im, ax=ax)
+        ax.set_title('Softmax Visual_Text Token Affinity')
+        plt.savefig(pre_group_text_affinity_metric_path)
+        plt.close()
 
         avg_affinity_mat = (img_avg_feat @ text_tokens.T) * logit_scale
         avg_affinity_mat = F.softmax(avg_affinity_mat, dim=-1)
+        
+        avg_affinity_metric_path = osp.join(self.output_dir, 'avg_affinity_metric.png')
+        avg_affinity_mat_cpu = avg_affinity_mat.detach().cpu().numpy()
+        fig, ax = plt.subplots()
+        im = ax.imshow(avg_affinity_mat_cpu, cmap='viridis')
+        cbar = ax.figure.colorbar(im, ax=ax)
+        ax.set_title('Avg Visual_Text Token Affinity')
+        plt.savefig(avg_affinity_metric_path)
+        plt.close()
+
         affinity_mask = torch.zeros_like(avg_affinity_mat)
         avg_affinity_topk = avg_affinity_mat.topk(dim=-1, k=min(5, num_fg_classes))
         affinity_mask.scatter_add_(
@@ -245,16 +376,56 @@ class GroupViTSegInference(EncoderDecoder):
         pred_logits = torch.zeros(num_classes, *attn_map.shape[:2], device=img.device, dtype=img.dtype)
 
         pred_logits[class_offset:] = rearrange(onehot_attn_map @ group_affinity_mat, 'h w c -> c h w')
+        affinity_value = (onehot_attn_map @ group_affinity_mat)
+        print("affinity value", affinity_value)
+        class_path = osp.join(self.output_dir, 'label_affinity_onehot')        
+        mmcv.mkdir_or_exist(class_path)
+        class_path = osp.join(class_path, 'class_{}.png')
+        affinity_values = affinity_value.detach().cpu().numpy()
+        for i in range(affinity_values.shape[-1]):
+            if np.any(affinity_values[:, :, i] != 0):
+                fig, ax = plt.subplots()
+                im = ax.imshow(affinity_values[:, :, i], cmap='viridis')
+                cbar = ax.figure.colorbar(im, ax=ax)
+                ax.set_title('Class_{}'.format(self.CLASSES[i+1]))
+                plt.savefig(class_path.format(self.CLASSES[i+1]))
+                plt.close()
+        
+        max_affinity_value = affinity_value.max(dim=-1).values
+        print("affinity value", max_affinity_value)
+
+        # max_affinity_value_path = osp.join(self.output_dir, 'max_affinity_value', 'affinity.png')
+        # cmap = plt.cm.get_cmap('viridis', 448)  # 10 colors for 10 classes
+        # # Create a heatmap plot using matplotlib
+        # fig, ax = plt.subplots()
+        # im = ax.imshow(max_affinity_value, cmap=cmap)
+        # # Add a color bar legend
+        # cbar = ax.figure.colorbar(im, ax=ax)
+        # # Set the axis labels and title
+        # ax.set_xlabel('X Label')
+        # ax.set_ylabel('Y Label')
+        # ax.set_title('Segmentation Heatmap')
+        # # Show or save the plot
+        # plt.show()
+        # fig.savefig(max_affinity_value_path)
+
         if self.with_bg:
             bg_thresh = min(self.bg_thresh, group_affinity_mat.max().item())
-            pred_logits[0, (onehot_attn_map @ group_affinity_mat).max(dim=-1).values < bg_thresh] = 1
-        import numpy as np
-        #np.savetxt('PRED_LOGIT.txt', pred_logits.numpy())
-        print(pred_logits.unsqueeze(0))
-        #np.savetxt('PRED_LOGIT_UNSQUEEZE.txt', pred_logits.unsqueeze(0).numpy())
+            pred_logits[0, max_affinity_value < bg_thresh] = 1
+        # pred_logits_path = osp.join(self.output_dir, 'pred_logits.png')        
+        # mmcv.mkdir_or_exist(pred_logits_path)
+        # pred_logits_cpu = pred_logits.unsqueeze(0).detach().cpu().numpy()
+
+        # fig, ax = plt.subplots()
+        # im = ax.imshow(pred_logits_cpu, cmap='viridis')
+        # cbar = ax.figure.colorbar(im, ax=ax)
+        # ax.set_title('Predictions')
+        # plt.savefig(pred_logits_path)
+        # plt.close()
+        
         return pred_logits.unsqueeze(0)
 
-    def blend_result(self, img, result, palette=None, out_file=None, opacity=0.5, with_bg=False):
+    def blend_result(self, img, result,  only_label=None, palette=None, out_file=None, opacity=0.5, with_bg=False):
         img = mmcv.imread(img)
         img = img.copy()
         seg = result[0]
@@ -266,6 +437,9 @@ class GroupViTSegInference(EncoderDecoder):
         assert 0 < opacity <= 1.0
         color_seg = np.zeros((seg.shape[0], seg.shape[1], 3), dtype=np.uint8)
         for label, color in enumerate(palette):
+            if only_label is not None and label != only_label:
+                #print(f"label:{label} is not equal to only_label:{only_label}")
+                continue
             color_seg[seg == label, :] = color
         # convert to BGR
         color_seg = color_seg[..., ::-1]
@@ -281,14 +455,20 @@ class GroupViTSegInference(EncoderDecoder):
             mmcv.imwrite(img, out_file)
 
         return img
+    #Hacky way to get set output dir
+    #Since this class is a sub-class of EncoderDecoder class there are several checks on return object and 
+    # argument which are hard to parse. So to set up an assessment pipeline this method helps in setting up several variables
+    def set_output_dir(self, output_file_path):
+        self.output_dir = output_file_path
 
     def show_result(self, img_show, img_tensor, result, out_file, vis_mode='input'):
 
         assert vis_mode in [
-            'input', 'pred', 'input_pred', 'all_groups', 'second_group', 'first_group',
-             'final_group', 'input_pred_label'
+            'input', 'heatmap','pred', 'input_pred', 'all_groups', 'second_group', 'first_group',
+             'final_group', 'input_pred_label', 'input_pred_distinct_labels'
         ], vis_mode
-
+        #imgtensor: [B,C,H,W]
+        #
         if vis_mode == 'input':
             mmcv.imwrite(img_show, out_file)
         elif vis_mode == 'pred':
@@ -296,6 +476,12 @@ class GroupViTSegInference(EncoderDecoder):
             output.putpalette(np.array(self.PALETTE).astype(np.uint8))
             mmcv.mkdir_or_exist(osp.dirname(out_file))
             output.save(out_file.replace('.jpg', '.png'))
+        elif vis_mode == 'heatmap':
+            output = Image.fromarray(result[0].astype(np.uint8)).convert('P')
+            output.putpalette(np.array(self.PALETTE).astype(np.uint8))
+            mmcv.mkdir_or_exist(osp.dirname(out_file))
+            display_instances(img_show, result[0], fname= out_file, blur=False)
+            
         elif vis_mode == 'input_pred':
             self.blend_result(img=img_show, result=result, out_file=out_file, opacity=0.5, with_bg=self.with_bg)
         elif vis_mode == 'input_pred_label':
@@ -336,6 +522,7 @@ class GroupViTSegInference(EncoderDecoder):
                     verticalalignment='top',
                     horizontalalignment='left')
             plt.imshow(blended_img)
+
             stream, _ = canvas.print_to_buffer()
             buffer = np.frombuffer(stream, dtype='uint8')
             img_rgba = buffer.reshape(height, width, 4)
@@ -344,7 +531,135 @@ class GroupViTSegInference(EncoderDecoder):
             img = mmcv.rgb2bgr(img)
             mmcv.imwrite(img, out_file)
             plt.close()
+        elif vis_mode == 'input_pred_distinct_labels':
+            labels = np.unique(result[0])
+            coord_map = seg2coord(result[0])
+            from pathlib import Path
+            path = Path(out_file)
+            parent_dir = path.parent
+            # reference: https://github.com/open-mmlab/mmdetection/blob/ff9bc39913cb3ff5dde79d3933add7dc2561bab7/mmdet/models/detectors/base.py#L271 # noqa
+            for i, label in enumerate(labels):
+                blended_img = self.blend_result(img=img_show, result=result, only_label=label,
+                                                 out_file=None, opacity=0.75, with_bg=self.with_bg)
+                blended_img = mmcv.bgr2rgb(blended_img)
+                width, height = img_show.shape[1], img_show.shape[0]
+                EPS = 1e-2
+                fig = plt.figure(frameon=False)
+                canvas = fig.canvas
+                dpi = fig.get_dpi()
+                fig.set_size_inches((width + EPS) / dpi, (height + EPS) / dpi)
 
+                # remove white edges by set subplot margin
+                plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+                ax = plt.gca()
+                ax.axis('off')
+                if self.with_bg and label == 0:
+                    continue
+                center = coord_map[label].astype(np.int32)
+                label_text = self.CLASSES[label]
+                ax.text(
+                    center[1],
+                    center[0],
+                    f'{label_text}',
+                    bbox={
+                        'facecolor': 'black',
+                        'alpha': 0.5,
+                        'pad': 0.7,
+                        'edgecolor': 'none'
+                    },
+                    color='orangered',
+                    fontsize=16,
+                    verticalalignment='top',
+                    horizontalalignment='left')
+                #plt.imshow(blended_img)
+                ax.imshow(blended_img)
+                stream, _ = canvas.print_to_buffer()
+                buffer = np.frombuffer(stream, dtype='uint8')
+                img_rgba = buffer.reshape(height, width, 4)
+                rgb, alpha = np.split(img_rgba, [3], axis=2)
+                img = rgb.astype('uint8')
+                img = mmcv.rgb2bgr(img)
+                mmcv.imwrite(img, str(parent_dir)+'/'+str(label)+'.jpg')
+                plt.close()
+        elif vis_mode == 'final_group_pred':
+            from pathlib import Path
+            path = Path(out_file)
+            parent_dir = path.parent
+            os.makedirs(parent_dir) if not os.path.exists(parent_dir) else None
+            meta_info = self.CLASSES
+            np.savetxt(str(parent_dir) +'/labels.txt', np.array(meta_info), delimiter=',', fmt='%s')
+            attn_map_list = self.get_attn_maps(img_tensor)
+            text_gt_affinity = self.get_text_gt_affinity(img_tensor)
+            assert len(attn_map_list) in [1, 2, 3]
+            num_groups = [attn_map_list[layer_idx].shape[-1] for layer_idx in range(len(attn_map_list))]
+            attn_map = attn_map_list[-1]
+            attn_map = rearrange(attn_map, 'b h w g -> b g h w')
+            attn_map = F.interpolate(
+                    attn_map, size=img_show.shape[:2], mode='bilinear', align_corners=self.align_corners)
+            pre_attention_map = attn_map.squeeze(0)
+            for i in range(pre_attention_map.shape[0]):
+                group_atten_map = pre_attention_map[i, :, :]
+                labels = np.unique(group_atten_map)
+            group_result = attn_map.argmax(dim=1).cpu().numpy()
+            patches = np.unique(group_result)
+            layer_out_file = out_file
+            self.blend_result(img=img_show, result=group_result, 
+                    palette=GROUP_PALETTE[sum(num_groups[:1]):sum(num_groups[:2])],
+                    out_file=layer_out_file,
+                    opacity=0.75)
+            coord_map = seg2coord(group_result.squeeze(0))
+            # reference: https://github.com/open-mmlab/mmdetection/blob/ff9bc39913cb3ff5dde79d3933add7dc2561bab7/mmdet/models/detectors/base.py#L271 # noqa
+            for i, patch in enumerate(patches):
+                patch_group_result = group_result.copy()
+                patch_group_result[patch_group_result != patch] = 0
+                blended_img = self.blend_result(img=img_show, result=patch_group_result, 
+                                                palette=GROUP_PALETTE[sum(num_groups[:1]):sum(num_groups[:2])],
+                                                out_file=str(parent_dir)+'/'+str(patch)+'.jpg',
+                                                opacity=0.75)
+                blended_img = mmcv.bgr2rgb(blended_img)
+                label_indexes = np.where(text_gt_affinity == patch)[0]
+                center = coord_map[patch].astype(np.int32)
+                if label_indexes.size != 0:
+                    for label in label_indexes:
+                        if self.with_bg and label == 0:
+                            continue
+                        width, height = img_show.shape[1], img_show.shape[0]
+                        EPS = 1e-2
+                        fig = plt.figure(frameon=False)
+                        canvas = fig.canvas
+                        dpi = fig.get_dpi()
+                        fig.set_size_inches((width + EPS) / dpi, (height + EPS) / dpi)
+
+                        # remove white edges by set subplot margin
+                        plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+                        ax = plt.gca()
+                        ax.axis('off')
+                        label_blended_img = blended_img.copy()
+                        label_text = self.CLASSES[label]
+                        ax.text(
+                            center[1],
+                            center[0],
+                            f'{label_text}',
+                            bbox={
+                                'facecolor': 'black',
+                                'alpha': 0.5,
+                                'pad': 0.7,
+                                'edgecolor': 'none'
+                            },
+                            color='orangered',
+                            fontsize=16,
+                            verticalalignment='top',
+                            horizontalalignment='left',
+                            wrap=True, )
+                        plt.imshow(label_blended_img)
+                        stream, _ = canvas.print_to_buffer()
+                        buffer = np.frombuffer(stream, dtype='uint8')
+                        img_rgba = buffer.reshape(height, width, 4)
+                        rgb, alpha = np.split(img_rgba, [3], axis=2)
+                        img = rgb.astype('uint8')
+                        img = mmcv.rgb2bgr(img)
+                        mmcv.imwrite(img, str(parent_dir)+'/'+str(patch)+'_'+str(label)+'.jpg')
+                        plt.close()
         elif vis_mode == 'all_groups' or vis_mode == 'final_group' or vis_mode == 'first_group' or vis_mode == 'second_group':
             attn_map_list = self.get_attn_maps(img_tensor)
             assert len(attn_map_list) in [1, 2, 3]

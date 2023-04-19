@@ -156,9 +156,6 @@ def validate_seg(config, data_loader, model):
             result = model(**data)
             results.extend(result)
 
-    
-    
-    
     metric = [data_loader.dataset.evaluate(results, metric='mIoU')]
     
     miou_result = metric[0]['mIoU'] * 100

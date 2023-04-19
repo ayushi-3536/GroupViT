@@ -8,13 +8,15 @@
 # Written by Jiarui Xu
 # -------------------------------------------------------------------------
 
-import torch
 import argparse
 import os.path as osp
 import sys
+
 parentdir = osp.dirname(osp.dirname(__file__))
 sys.path.insert(0, parentdir)
+
 import mmcv
+import torch
 from datasets import build_text_transform
 from mmcv.cnn.utils import revert_sync_batchnorm
 from mmcv.image import tensor2imgs
@@ -24,14 +26,7 @@ from omegaconf import read_write
 from segmentation.datasets import COCOObjectDataset, PascalContextDataset, PascalVOCDataset
 from segmentation.evaluation import build_seg_demo_pipeline, build_seg_inference
 from utils import get_config, load_checkpoint
-# import debugpy
 
-# 5678 is the default attach port in the VS Code debug configurations. Unless a host and port are specified, host defaults to 127.0.0.1
-# debugpy.listen(2122)
-# print("Waiting for debugger attach")
-# debugpy.wait_for_client()
-# debugpy.breakpoint()
-# print('break on this line')
 def parse_args():
     parser = argparse.ArgumentParser('GroupViT demo')
     parser.add_argument(
@@ -57,12 +52,11 @@ def parse_args():
 
     parser.add_argument('--device', default='cpu', help='Device used for inference')
     parser.add_argument(
-        '--dataset', default='voc', choices=['voc', 'coco', 'context'], help='dataset classes for visualization')
+        '--dataset', default='coco', choices=['voc', 'coco', 'context'], help='dataset classes for visualization')
 
     parser.add_argument('--input', type=str, help='input image path')
     parser.add_argument('--output_dir', type=str, help='output dir')
-    parser.add_argument('--allow_shape_change', default=True, type=bool,  help='path to config file')
-    
+
     args = parser.parse_args()
     args.local_rank = 0  # compatible with config
 
@@ -75,7 +69,7 @@ def inference(args, cfg):
     model.to(args.device)
     model.eval()
 
-    load_checkpoint(cfg, model, None, None, args.allow_shape_change)
+    load_checkpoint(cfg, model, None, None)
 
     text_transform = build_text_transform(False, cfg.data.text_aug, with_dc=False)
     if args.dataset == 'voc':
@@ -113,7 +107,7 @@ def vis_seg(seg_model, input_img, output_dir, vis_modes):
         data['img_metas'] = [i.data[0] for i in data['img_metas']]
     with torch.no_grad():
         result = seg_model(return_loss=False, rescale=True, **data)
-    print("results", result)
+
     img_tensor = data['img'][0]
     img_metas = data['img_metas'][0]
     imgs = tensor2imgs(img_tensor, **img_metas[0]['img_norm_cfg'])

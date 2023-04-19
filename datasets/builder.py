@@ -97,9 +97,10 @@ def build_loader(config):
     return dataset_train, dataset_val, data_loader_train, data_loader_val
 
 
-def build_loader_sync(config):
+def build_loader_sync(config, is_train_assess=False):
     
-    dataset_train = build_dataset_sync(is_train=True, config=config)
+    is_train = not is_train_assess
+    dataset_train = build_dataset_sync(is_train=is_train, config=config)
     dataset_val = build_dataset_sync(is_train=False, config=config)
     dc_collate = partial(collate, samples_per_gpu=config.batch_size)
     train_len = len(dataset_train)
@@ -268,8 +269,60 @@ def build_dataset_sync(is_train, config):
     # yapf: enable
 
     return dataset
-def build_img_transform(is_train, config, with_dc=True):
 
+def build_train_assessment_dataset(is_train, config):
+    text_transform = build_text_transform(is_train, config.text_aug, with_dc=False, train_assessment=True)
+    #print("is_train",is_train)
+    split = 'train' if is_train else 'val'
+    dataset_type = None
+    tar_file_list = []
+    total_length = 0
+    for ds in config.dataset[split]:
+        #print("current dataset:",ds)
+        ds_meta = config.dataset.meta[ds]
+        if dataset_type is None:
+            dataset_type = ds_meta.type
+        else:
+            assert dataset_type == ds_meta.type, \
+                'All datasets must be of the same type'
+
+        prefix = ds_meta.prefix
+        path = ds_meta.path
+        length = ds_meta.length
+        cur_tar_file_list = []
+        for tar_file in braceexpand(osp.join(path, prefix)):
+            if osp.exists(tar_file):
+                cur_tar_file_list.append(tar_file)
+        print(f'Found {len(cur_tar_file_list)} files for dataset {ds}')
+        tar_file_list.extend(cur_tar_file_list)
+        total_length += length
+    print(f'Found {len(tar_file_list)} files in total for split {split}')
+    # yapf: disable
+    if is_train:
+        dataset = (  # noqa
+            wds.WebDataset(tar_file_list, repeat=True, handler=warn_and_continue) #, shardshuffle=True)
+            #.shuffle(config.shuffle_buffer, initial=600000 )
+            .decode('pil', handler=warn_and_continue)
+            .rename(image='jpg;png;jpeg', text='text;txt', keep=False, handler=warn_and_continue)
+            #.map_dict(text=text_transform, handler=warn_and_continue)
+            .with_length(total_length))
+        print("dataset", type(dataset))
+
+    return dataset
+        # from PIL import Image 
+        # import PIL 
+        # from itertools import islice   
+        # for i,sample in enumerate(islice(dataset, 0, 64)):
+        #     for key, value in sample.items():
+        #         print("i:",i)
+        #         print(key, repr(value))
+        #         if key is 'image':
+        #             value.save(f'img_{i}.jpg')
+        #     print()
+
+    # yapf: enable
+
+def build_img_transform(is_train, config, with_dc=True):
     if not config.deit_aug:
         if is_train:
             transform = transforms.Compose([
@@ -300,6 +353,12 @@ def build_img_transform(is_train, config, with_dc=True):
             re_count=config.re_count,
             interpolation=config.interpolation,
         )
+        # transform = transforms.Compose([
+        #     # transforms.Resize(size, interpolation=_pil_interp(config.interpolation)),
+        #     # transforms.CenterCrop(config.img_size),
+        #     transforms.ToTensor()
+        #     # transforms.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)
+        # ])
     else:
         size = int((256 / 224) * config.img_size)
         transform = transforms.Compose([
@@ -315,7 +374,7 @@ def build_img_transform(is_train, config, with_dc=True):
     return transform
 
 
-def build_text_transform(is_train, config, with_dc=True):
+def build_text_transform(is_train, config, with_dc=True, train_assessment=False):
     local_rank = dist.get_rank() % torch.cuda.device_count() if dist.is_initialized() else 0
     if config.multi_label and is_train:
         # only down on local rank 0
@@ -326,8 +385,11 @@ def build_text_transform(is_train, config, with_dc=True):
             max_word=config.multi_label,
             word_type=config.word_type,
             pre_computed_nouns=config.pre_generated_nouns,
-            generate_prompt_for_np=config.generate_prompt_for_np)
-
+            generate_prompt_for_np=config.generate_prompt_for_np,
+            train_assessment=train_assessment,
+            generate_prompt=config.generate_prompt,
+            with_caption=config.with_caption,
+            max_length_fixed=config.max_length_fixed)
     else:
         transform = Tokenize(SimpleTokenizer(), max_seq_len=config.max_seq_len)
 
@@ -373,7 +435,7 @@ class Tokenize:
 class WordAugTokenizeWrapper:
 
     def __init__(self, tokenize, max_word=3, template_set='subset', word_type='noun', pre_computed_nouns=False,
-                  generate_prompt_for_np=True):
+                  generate_prompt_for_np=True, train_assessment=False, generate_prompt=True, with_caption=True, max_length_fixed=True):
         self.tokenize = tokenize
         self.max_word = max_word
         from .imagenet_template import (full_imagenet_templates, sub_imagenet_template, simple_imagenet_template,
@@ -393,6 +455,9 @@ class WordAugTokenizeWrapper:
         assert word_type in ['noun', 'noun_phrase']
         self.word_type = word_type
         self.pre_computed_nouns = pre_computed_nouns
+        self.train_assessment = train_assessment
+        self.generate_prompt = generate_prompt
+        self.with_caption = with_caption
         if self.pre_computed_nouns:
             import pickle
 
@@ -403,9 +468,8 @@ class WordAugTokenizeWrapper:
             with open(pickle_path, "rb") as f:
                 # Load the dictionary from the file
                 self.caption_nouns_dict = pickle.load(f)
-
         self.generate_prompt_for_np = generate_prompt_for_np
-
+        self.max_length_fixed=max_length_fixed
 
     def get_tag(self, tokenized, tags):
         if not isinstance(tags, (list, tuple)):
@@ -459,22 +523,28 @@ class WordAugTokenizeWrapper:
                     nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP']) #, 'VBG', 'VB', 'VBD', 'VBN', 'VBP', 'VBZ'])
                 elif self.word_type == 'noun_phrase':
                     nouns = list(set(self.get_noun_phrase(tokenized) + self.get_tag(tokenized, ['NN', 'NNS', 'NNP'])))
-                    
-                # elif self.word_type == 'both':
-                #     nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP'])
-                #     noun_phrases = self.get_noun_phrase(tokenized)
                 else:
                     raise ValueError('word_type must be noun or noun_phrase')
 
-        prompt_texts = []
+        texts = []
         if len(nouns) > 0:
-            select_nouns = np.random.choice(nouns, min(self.max_word, len(nouns)), replace=False)
-            if not self.generate_prompt_for_np:
-                prompt_texts = [np.random.choice(self.templates).format(noun) if len(noun.split()) == 1 else noun for noun in select_nouns]
+            if self.max_length_fixed:
+                nouns = np.random.choice(nouns, min(self.max_word, len(nouns)), replace=False)
+            if self.generate_prompt:
+                if not self.generate_prompt_for_np:
+                    texts = [np.random.choice(self.templates).format(noun) if len(noun.split()) == 1 else noun for noun in nouns]
+                else:
+                    texts = [np.random.choice(self.templates).format(noun) for noun in nouns]
             else:
-                prompt_texts = [np.random.choice(self.templates).format(noun) for noun in select_nouns]
-        if len(prompt_texts) < self.max_word:
-            prompt_texts += [text] * (self.max_word - len(prompt_texts))
-
-        texts = [text] + prompt_texts
-        return self.tokenize(texts)
+                texts = [noun for noun in nouns]
+        if self.max_length_fixed and len(texts) < self.max_word and not self.train_assessment:
+            texts += [text] * (self.max_word - len(texts))
+        if self.train_assessment:
+            texts = ['background'] + [text] + texts
+        elif self.with_caption: 
+            texts = [text] + texts
+        print("texts",texts)
+        if self.train_assessment:
+            return texts, self.tokenize(texts)
+        else:
+            return self.tokenize(texts)

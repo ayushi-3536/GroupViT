@@ -13,6 +13,7 @@ import os
 import os.path as osp
 import mmcv
 import torch
+from mmcv.runner import get_dist_info, init_dist, set_random_seed
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 from datasets import build_text_transform
@@ -56,7 +57,8 @@ def parse_args():
         '--vis',
         help='Specify the visualization mode, '
         'could be a list, support input, pred, input_seg, input_pred_seg_label, all_groups, first_group, last_group',
-        default=None,
+        default=['input', 'pred', 'input_pred', 'all_groups', 'second_group', 'first_group',
+             'final_group', 'input_pred_label', 'input_pred_distinct_labels'],
         nargs='+')
 
     # distributed training
@@ -87,14 +89,14 @@ def inference(cfg):
 
     load_checkpoint(cfg, model, None, None)
 
-    if 'seg' in cfg.evaluate.task:
-        miou = validate_seg(cfg, data_loader, model)
-        logger.info(f'mIoU of the network on the {len(data_loader.dataset)} test images: {miou:.2f}%')
-    else:
-        logger.info('No segmentation evaluation specified')
+    # if 'seg' in cfg.evaluate.task:
+    #     miou = validate_seg(cfg, data_loader, model)
+    #     logger.info(f'mIoU of the network on the {len(data_loader.dataset)} test images: {miou:.2f}%')
+    # else:
+    #     logger.info('No segmentation evaluation specified')
 
-    if cfg.vis:
-        vis_seg(cfg, data_loader, model, cfg.vis)
+    #if cfg.vis:
+    vis_seg(cfg, data_loader, model, cfg.vis)
 
 
 @torch.no_grad()
@@ -121,9 +123,12 @@ def vis_seg(config, data_loader, model, vis_modes):
         prog_bar = mmcv.ProgressBar(len(dataset))
     loader_indices = data_loader.batch_sampler
     for batch_indices, data in zip(loader_indices, data_loader):
+        assert len(batch_indices)==1
+        out_file = osp.join(config.output, 'results', f'{batch_indices[0]:04d}')
+        model.set_output_dir(out_file)
         with torch.no_grad():
             result = mmddp_model(return_loss=False, **data)
-
+        print("result", result)
         img_tensor = data['img'][0]
         img_metas = data['img_metas'][0].data[0]
         imgs = tensor2imgs(img_tensor, **img_metas[0]['img_norm_cfg'])
@@ -137,7 +142,7 @@ def vis_seg(config, data_loader, model, vis_modes):
             img_show = mmcv.imresize(img_show, (ori_w, ori_h))
 
             for vis_mode in vis_modes:
-                out_file = osp.join(config.output, 'vis_imgs', vis_mode, f'{batch_idx:04d}.jpg')
+                out_file = osp.join(config.output, 'results', f'{batch_idx:04d}', vis_mode, f'{batch_idx:04d}.jpg')
                 model.show_result(img_show, img_tensor.to(device), result, out_file, vis_mode)
             if dist.get_rank() == 0:
                 batch_size = len(result) * dist.get_world_size()
@@ -165,8 +170,8 @@ def main():
         world_size = -1
     print("local rank",cfg.local_rank)
     torch.cuda.set_device(cfg.local_rank)
-
-    dist.init_process_group(backend='nlcc', init_method='env://', world_size=world_size, rank=rank)
+    init_dist('pytorch')
+    #dist.init_process_group(backend='nlcc', init_method='env://', world_size=world_size, rank=rank)
 
     dist.barrier()
 

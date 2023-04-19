@@ -9,9 +9,10 @@
 # -------------------------------------------------------------------------
 
 
-from .builder import build_loader, build_text_transform, build_loader_sync
+from .builder import build_loader, build_text_transform, build_loader_sync, build_train_assessment_dataset
 from .imagenet_template import imagenet_classes, template_meta
 
 __all__ = [
-    'build_loader', build_text_transform, template_meta, imagenet_classes, build_loader_sync
+    'build_loader', build_text_transform, template_meta, imagenet_classes, build_loader_sync, 
+    build_train_assessment_dataset
 ]

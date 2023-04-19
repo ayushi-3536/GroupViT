@@ -31,8 +31,7 @@ import datetime
 import os
 import os.path as osp
 import time
-from collections import defaultdict
-
+from collections import defaultdict, OrderedDict
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
@@ -199,13 +198,13 @@ def train(cfg):
     if cfg.wandb and dist.get_rank() == 0:
         import wandb
         wandb.init(
-            #id='e6h1oyjs',
+            id='iaun1h5n',
             project='group_vit',
             sync_tensorboard=True,
             name=osp.join(cfg.model_name, cfg.tag),
             dir=cfg.output,#wandb_output,
             config=OmegaConf.to_container(cfg, resolve=True),
-            #resume='must'
+            resume='must'
         )
     else:
         wandb = None
@@ -549,12 +548,31 @@ def validate_seg(config, data_loader, model):
         format_only=False)
 
     if dist.get_rank() == 0:
-        metric = [data_loader.dataset.evaluate(results, metric='mIoU')]
-    else:
-        metric = [None]
-    dist.broadcast_object_list(metric)
-    miou_result = metric[0]['mIoU'] * 100
 
+        metrics = [data_loader.dataset.evaluate(results, metric='mIoU')]
+        # import csv
+        # import numpy as np
+        # file_name = config.output+'/'+ str(data_loader.dataset.__class__.__name__) + '_per_class_iou.csv'
+        # ret_metrics = metrics[0]
+        # miou_result = ret_metrics['mIoU'] * 100
+        # print("miou_result", miou_result)
+        # print("metric", ret_metrics)
+        # ret_metrics_class = OrderedDict({
+        #     ret_metric: np.round(ret_metric_value * 100, 2)
+        #     for ret_metric, ret_metric_value in ret_metrics.items()
+        # })
+
+        # Save the per-class IoU scores into a CSV file
+        # with open(file_name, 'w', newline='') as f:
+        #     writer = csv.writer(f)
+        #     writer.writerow(['Class Name', 'IoU Score'])
+        #     for key, val in ret_metrics_class.items():
+        #       if 'IoU.' in key:
+        #         writer.writerow([key.split('.')[1], val])
+    else:
+        metrics = [None]
+    dist.broadcast_object_list(metrics)
+    miou_result = metrics[0]['mIoU'] * 100
     torch.cuda.empty_cache()
     logger.info(f'Eval Seg mIoU {miou_result:.2f}')
     dist.barrier()

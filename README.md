@@ -69,6 +69,8 @@ git clone https://github.com/NVIDIA/apex
 cd && apex && pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 pip install opencv-python==4.4.0.46 termcolor==1.1.0 diffdist einops omegaconf
 pip install nltk ftfy regex tqdm
+pip install wandb
+pip install tensorboard
 ```
 
 ## Demo
@@ -82,6 +84,15 @@ pip install nltk ftfy regex tqdm
 ```shell
 python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis input_pred_label final_group --input demo/examples/voc.jpg --output_dir demo/output
 ```
+
+python demo/train_assessment.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis  final_group_pred --output_dir demo/output/originalfix
+
+python demo/seg_evaluation.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis  input pred input_pred all_groups first_group final_group input_pred_label  --output_dir demo/output/originalfix --dataset voc
+
+python demo/train_assessment.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/gs2_nounphrase_5_grouping/group_vit_gcc_yfcc_30e-879422e0.pth --vis input pred input_pred all_groups first_group final_group input_pred_label input_pred_distinct_labels final_group_pred --output_dir demo/output/nnp_best_checkpoint1000
+
+python demo/train_assessment.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis input pred input_pred all_groups first_group final_group input_pred_label input_pred_distinct_labels final_group_pred --output_dir /misc/lmbraid21/sharmaa/demo/output/originalfix
+
 python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/gs2_ft_grouping_lr_scaling_0.01_1cl_de20/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/coco/images/000000147725.jpg --dataset coco  --output_dir demo/output/coco/gs2_ft_grouping_lr_scaling_0.01_1cl_de20
 
 python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/outputs/gs2finetune_onlygrouping_64bw2/checkpoint.pth --vis input pred input_pred all_groups first_group final_group input_pred_label --input demo/examples/voc.jpg --dataset coco  --output_dir demo/output/gs2_ft_only_groupinglayer
@@ -325,7 +336,8 @@ python test_trainable_param.py --cfg configs/gs3_group_vit_gcc_yfcc_30e.yml
 
 ./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 4 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_allparam_lrtuned
 
-./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_ft_grouping_lr_scaling_0.01_we1
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/test
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/onlycaption
 ```shell
 (node0)$ ./tools/dist_launch.sh main_group_vit.py /path/to/config $GPUS_PER_NODE
 ```
@@ -368,7 +380,7 @@ We used 16 NVIDIA V100 GPUs for pre-training (in 2 days) in our paper.
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint
 ```
 
-./tools/dist_launch.sh main_seg.py configs/group_vit_gcc_yfcc_30e.yml 8 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth
+./tools/dist_launch.sh main_seg.py configs/group_vit_gcc_yfcc_30e.yml 1 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/checkpoints/
 #
 #/misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4/ckpt_epoch_11_best_miou.pth
 #/misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4/checkpoint.pth
@@ -380,7 +392,7 @@ We used 16 NVIDIA V100 GPUs for pre-training (in 2 days) in our paper.
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/pascal_context.py
 
 #### COCO
-./tools/dist_launch.sh main_seg.py      $1 --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/coco.py
+./tools/dist_launch.sh main_seg.py  configs/group_vit_gcc_yfcc_30e.yml  1 --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/coco.py
 /misc/student/sharmaa/coco_stuff164k
 ```shell
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint --opts evaluate.seg.cfg segmentation/configs/_base_/datasets/coco.py
