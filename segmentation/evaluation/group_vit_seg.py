@@ -208,7 +208,7 @@ class GroupViTSegInference(EncoderDecoder):
         # [N, C]
         self.register_buffer('text_embedding', text_embedding)
         self.with_bg = with_bg
-        self.bg_thresh = test_cfg['bg_thresh']
+        self.bg_thresh = 0.5 #test_cfg['bg_thresh']
         if self.with_bg:
             self.num_classes = len(text_embedding) + 1
         else:
@@ -273,6 +273,109 @@ class GroupViTSegInference(EncoderDecoder):
 
         return attn_maps
 
+    def save_heat_maps(self, data, file_path, title):
+        fig, ax = plt.subplots()
+        im = ax.imshow(data, cmap='viridis')
+        cbar = ax.figure.colorbar(im, ax=ax)
+        ax.set_title(title)
+        plt.savefig(file_path)
+        plt.close()
+    
+    def save_class_affinity_maps(self, data, file_path, title):
+        fig, ax = plt.subplots()
+        im = ax.imshow(data, cmap='viridis')
+        cbar = ax.figure.colorbar(im, ax=ax)
+        ax.set_title(title)
+        ax.set_xticks(range(len(self.CLASSES[1:])))
+        ax.set_xticklabels(self.CLASSES[1:], rotation=90, ha='right')
+        plt.savefig(file_path)
+        plt.close()
+    
+    def plot_attn_map(self,attn_map, index, file_path, title='Group {}', format=True, format_value='0'):
+            """
+            Plots an attention map for a specific index in a list.
+            """
+            fig, ax = plt.subplots()
+            if np.any(attn_map[:, :, index] != 0):
+                im = ax.imshow(attn_map[:, :, index], cmap='viridis')
+                cbar = ax.figure.colorbar(im, ax=ax)
+                # This code is used to plot the data for each group/class.
+                # The variable 'i' is the group/class number.
+                if format:
+                    ax.set_title(title.format(format_value))
+                    plt.savefig(file_path.format(format_value))
+                else:
+                    ax.set_title(title.format(index))
+                    plt.savefig(file_path.format(index))
+                plt.close()
+
+    def save_all_visualization(self, results):
+        attn_map = results['attention_map']
+        onehot_attn_map = results['onehot_attn_map']
+        group_affinity_mat = results['group_affinity_mat']
+        pre_group_affinity_mat = results['pre_group_affinity_mat']
+        avg_affinity_mat = results['avg_affinity_mat']
+        affinity_value = results['affinity_value']
+        
+        """save attention map"""
+        attn_map_results_path = osp.join(self.output_dir, 'attn_map')
+        mmcv.mkdir_or_exist(attn_map_results_path)
+        attn_map_results_path = osp.join(attn_map_results_path,'attn_map{}.png')
+        for i in range(attn_map.shape[-1]):
+            self.plot_attn_map(attn_map.detach().cpu().numpy(), i, attn_map_results_path, 'Group {}')
+
+        """calculate shannon entropy for each group"""
+        dist_attn_map = F.softmax(attn_map, dim=-1)
+        shannon_entropy = -dist_attn_map * torch.log(dist_attn_map)
+        sum_shannon_entropy = shannon_entropy[:-1].sum(dim=-1)
+
+        """save entropy map"""
+        entropy_map_path = osp.join(self.output_dir, 'entropy_map')
+        mmcv.mkdir_or_exist(entropy_map_path)
+        sum_entropy_map_path = osp.join(entropy_map_path, 'sum_entropy_map.png')
+        self.save_heat_maps(sum_shannon_entropy, sum_entropy_map_path, 'Sum Entropy Of Attention Map Distrubtion Across Groups')
+
+        """save onehot attention map"""
+        onehot_attn_map_path = osp.join(self.output_dir, 'one_hot_attn')
+        mmcv.mkdir_or_exist(onehot_attn_map_path)
+        onehot_attn_map_path = osp.join(onehot_attn_map_path, 'onehot_attn_map{}.png')
+        for i in range(onehot_attn_map.shape[-1]):
+            self.plot_attn_map(onehot_attn_map.detach().cpu().numpy(), i, onehot_attn_map_path, 'Group {}')
+
+        """save affinity matrix"""
+        group_text_affinity_metric_path = osp.join(self.output_dir, 'group_text_affinity_metric.png')
+        pre_group_text_affinity_metric_path = osp.join(self.output_dir, 'pre_group_text_affinity_metric.png')        
+        avg_affinity_metric_path = osp.join(self.output_dir, 'avg_affinity_metric.png')
+        
+        self.save_class_affinity_maps(group_affinity_mat.detach().cpu().numpy(),
+                                    group_text_affinity_metric_path,
+                                    'Visual_Text Token Affinity')
+        self.save_class_affinity_maps(pre_group_affinity_mat.detach().cpu().numpy(),
+                                       pre_group_text_affinity_metric_path, 
+                                       'Softmax Visual_Text Token Affinity')
+        self.save_class_affinity_maps(avg_affinity_mat.detach().cpu().numpy(),
+                                       avg_affinity_metric_path, 
+                                       'Avg Visual_Text Token Affinity')
+        
+        """save class-threshold attention map(masks) affinity heat map"""
+        class_path = osp.join(self.output_dir, 'label_affinity_onehot')        
+        mmcv.mkdir_or_exist(class_path)
+        class_path = osp.join(class_path, 'class_{}.png')
+        for i in range(affinity_value.shape[-1]):
+             self.plot_attn_map(affinity_value.detach().cpu().numpy(), i,class_path, 'Class {}', format=True, format_value=self.CLASSES[i+1])
+        
+
+        """calculate entropy of attention map distribution across classes"""
+        prob_affinity_value = (attn_map @ group_affinity_mat)
+        print("affinity value", prob_affinity_value)
+        dist_prob_affinity_value = F.softmax(prob_affinity_value, dim=-1)
+        class_path = osp.join(self.output_dir, 'entropy_affinity')        
+        mmcv.mkdir_or_exist(class_path)
+        class_path = osp.join(class_path, 'class_entropy.png')
+        entropy = -torch.sum(dist_prob_affinity_value * torch.log(dist_prob_affinity_value), dim=-1)
+        self.save_heat_maps(entropy, class_path, 'Entropy Of Attention Map Distrubtion Across Classes')
+
+
     def encode_decode(self, img, img_metas):
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
@@ -283,33 +386,11 @@ class GroupViTSegInference(EncoderDecoder):
         attn_map = self.get_attn_maps(img, rescale=True)[-1]
         # [H, W, G], select batch idx 0
         attn_map = attn_map[0]
-        attn_map_results_path = osp.join(self.output_dir, 'attn_map')
-        mmcv.mkdir_or_exist(attn_map_results_path)
-        attn_map_results_path = osp.join(attn_map_results_path,'attn_map{}.png')
-        attn_maps = attn_map.detach().cpu().numpy()
-        for i in range(attn_maps.shape[-1]):
-            fig, ax = plt.subplots()
-            if np.any(attn_maps[:, :, i] != 0):
-                im = ax.imshow(attn_maps[:, :, i], cmap='viridis')
-                cbar = ax.figure.colorbar(im, ax=ax)
-                ax.set_title('Group {}'.format(i))
-                plt.savefig(attn_map_results_path.format(i))
-                plt.close()
-        # [H, W, G]
-        onehot_attn_map = F.one_hot(attn_map.argmax(dim=-1), num_classes=attn_map.shape[-1]).to(dtype=attn_map.dtype)
-        onehot_attn_map_path = osp.join(self.output_dir, 'one_hot_attn')
-        mmcv.mkdir_or_exist(onehot_attn_map_path)
-        onehot_attn_map_path = osp.join(onehot_attn_map_path, 'onehot_attn_map{}.png')
-        onehot_attn_maps = onehot_attn_map.detach().cpu().numpy()
-        for i in range(onehot_attn_maps.shape[-1]):
-            fig, ax = plt.subplots()
-            if np.any(onehot_attn_maps[:, :, i] != 0):
-                im = ax.imshow(onehot_attn_maps[:, :, i], cmap='viridis')
-                cbar = ax.figure.colorbar(im, ax=ax)
-                ax.set_title('Group {}'.format(i))
-                plt.savefig(onehot_attn_map_path.format(i))
-                plt.close()
 
+
+        """Thresholding the attention map"""
+        onehot_attn_map = F.one_hot(attn_map.argmax(dim=-1), num_classes=attn_map.shape[-1]).to(dtype=attn_map.dtype)
+        
         num_fg_classes = self.text_embedding.shape[0]
         class_offset = 1 if self.with_bg else 0
         text_tokens = self.text_embedding
@@ -329,39 +410,15 @@ class GroupViTSegInference(EncoderDecoder):
         img_avg_feat = F.normalize(img_avg_feat, dim=-1)
 
         # [G, N]
+        """calculate affinity matrix"""
         group_affinity_mat = (grouped_img_tokens @ text_tokens.T) * logit_scale
         pre_group_affinity_mat = F.softmax(group_affinity_mat, dim=-1)
-        group_text_affinity_metric_path = osp.join(self.output_dir, 'group_text_affinity_metric.png')
-        pre_group_text_affinity_metric_path = osp.join(self.output_dir, 'pre_group_text_affinity_metric.png')
 
-        group_affinity_mat_cpu = group_affinity_mat.detach().cpu().numpy()
-        fig, ax = plt.subplots()
-        im = ax.imshow(group_affinity_mat_cpu, cmap='viridis')
-        cbar = ax.figure.colorbar(im, ax=ax)
-        ax.set_title('Visual_Text Token Affinity')
-        plt.savefig(group_text_affinity_metric_path)
-        plt.close()
-
-        pre_group_affinity_mat_cpu = pre_group_affinity_mat.detach().cpu().numpy()
-        fig, ax = plt.subplots()
-        im = ax.imshow(pre_group_affinity_mat_cpu, cmap='viridis')
-        cbar = ax.figure.colorbar(im, ax=ax)
-        ax.set_title('Softmax Visual_Text Token Affinity')
-        plt.savefig(pre_group_text_affinity_metric_path)
-        plt.close()
-
+        """calculate average affinity matrix"""
         avg_affinity_mat = (img_avg_feat @ text_tokens.T) * logit_scale
         avg_affinity_mat = F.softmax(avg_affinity_mat, dim=-1)
-        
-        avg_affinity_metric_path = osp.join(self.output_dir, 'avg_affinity_metric.png')
-        avg_affinity_mat_cpu = avg_affinity_mat.detach().cpu().numpy()
-        fig, ax = plt.subplots()
-        im = ax.imshow(avg_affinity_mat_cpu, cmap='viridis')
-        cbar = ax.figure.colorbar(im, ax=ax)
-        ax.set_title('Avg Visual_Text Token Affinity')
-        plt.savefig(avg_affinity_metric_path)
-        plt.close()
 
+        """calculate group affinity for top-5 classes"""
         affinity_mask = torch.zeros_like(avg_affinity_mat)
         avg_affinity_topk = avg_affinity_mat.topk(dim=-1, k=min(5, num_fg_classes))
         affinity_mask.scatter_add_(
@@ -373,56 +430,24 @@ class GroupViTSegInference(EncoderDecoder):
         # TODO: check if necessary
         group_affinity_mat *= pre_group_affinity_mat
 
+        """get similarity of patch and text"""
         pred_logits = torch.zeros(num_classes, *attn_map.shape[:2], device=img.device, dtype=img.dtype)
-
         pred_logits[class_offset:] = rearrange(onehot_attn_map @ group_affinity_mat, 'h w c -> c h w')
         affinity_value = (onehot_attn_map @ group_affinity_mat)
-        print("affinity value", affinity_value)
-        class_path = osp.join(self.output_dir, 'label_affinity_onehot')        
-        mmcv.mkdir_or_exist(class_path)
-        class_path = osp.join(class_path, 'class_{}.png')
-        affinity_values = affinity_value.detach().cpu().numpy()
-        for i in range(affinity_values.shape[-1]):
-            if np.any(affinity_values[:, :, i] != 0):
-                fig, ax = plt.subplots()
-                im = ax.imshow(affinity_values[:, :, i], cmap='viridis')
-                cbar = ax.figure.colorbar(im, ax=ax)
-                ax.set_title('Class_{}'.format(self.CLASSES[i+1]))
-                plt.savefig(class_path.format(self.CLASSES[i+1]))
-                plt.close()
-        
         max_affinity_value = affinity_value.max(dim=-1).values
-        print("affinity value", max_affinity_value)
-
-        # max_affinity_value_path = osp.join(self.output_dir, 'max_affinity_value', 'affinity.png')
-        # cmap = plt.cm.get_cmap('viridis', 448)  # 10 colors for 10 classes
-        # # Create a heatmap plot using matplotlib
-        # fig, ax = plt.subplots()
-        # im = ax.imshow(max_affinity_value, cmap=cmap)
-        # # Add a color bar legend
-        # cbar = ax.figure.colorbar(im, ax=ax)
-        # # Set the axis labels and title
-        # ax.set_xlabel('X Label')
-        # ax.set_ylabel('Y Label')
-        # ax.set_title('Segmentation Heatmap')
-        # # Show or save the plot
-        # plt.show()
-        # fig.savefig(max_affinity_value_path)
-
         if self.with_bg:
             bg_thresh = min(self.bg_thresh, group_affinity_mat.max().item())
             pred_logits[0, max_affinity_value < bg_thresh] = 1
-        # pred_logits_path = osp.join(self.output_dir, 'pred_logits.png')        
-        # mmcv.mkdir_or_exist(pred_logits_path)
-        # pred_logits_cpu = pred_logits.unsqueeze(0).detach().cpu().numpy()
 
-        # fig, ax = plt.subplots()
-        # im = ax.imshow(pred_logits_cpu, cmap='viridis')
-        # cbar = ax.figure.colorbar(im, ax=ax)
-        # ax.set_title('Predictions')
-        # plt.savefig(pred_logits_path)
-        # plt.close()
-        
+        dict_result = dict(attention_map=attn_map,
+                           onehot_attn_map=onehot_attn_map,
+                           group_affinity_mat=group_affinity_mat,
+                           pre_group_affinity_mat=pre_group_affinity_mat,
+                           avg_affinity_mat=avg_affinity_mat,
+                           affinity_value=affinity_value,
+                           pred_logits=pred_logits)
+        self.save_all_visualization(results=dict_result)
+
         return pred_logits.unsqueeze(0)
 
     def blend_result(self, img, result,  only_label=None, palette=None, out_file=None, opacity=0.5, with_bg=False):
