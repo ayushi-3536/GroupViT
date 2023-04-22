@@ -8,6 +8,7 @@
 # Written by Jiarui Xu
 # -------------------------------------------------------------------------
 
+
 from collections import OrderedDict
 
 import torch
@@ -19,6 +20,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from utils import get_logger
 from .builder import MODELS
 from .misc import Result, interpolate_pos_encoding
+
 
 
 class Mlp(nn.Module):
