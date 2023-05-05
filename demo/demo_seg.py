@@ -52,7 +52,7 @@ def parse_args():
 
     parser.add_argument('--device', default='cpu', help='Device used for inference')
     parser.add_argument(
-        '--dataset', default='coco', choices=['voc', 'coco', 'context'], help='dataset classes for visualization')
+        '--dataset', default='voc', choices=['voc', 'coco', 'context'], help='dataset classes for visualization')
 
     parser.add_argument('--input', type=str, help='input image path')
     parser.add_argument('--output_dir', type=str, help='output dir')
@@ -74,7 +74,7 @@ def inference(args, cfg):
     text_transform = build_text_transform(False, cfg.data.text_aug, with_dc=False)
     if args.dataset == 'voc':
         dataset_class = PascalVOCDataset
-        seg_cfg = 'segmentation/configs/_base_/datasets/pascal_voc12.py'
+        seg_cfg = 'GroupViT/segmentation/configs/_base_/datasets/pascal_voc12.py'
     elif args.dataset == 'coco':
         dataset_class = COCOObjectDataset
         seg_cfg = 'segmentation/configs/_base_/datasets/coco.py'

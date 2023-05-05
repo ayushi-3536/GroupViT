@@ -198,13 +198,13 @@ def train(cfg):
     if cfg.wandb and dist.get_rank() == 0:
         import wandb
         wandb.init(
-            id='iaun1h5n',
+            #id='li9dwzde',
             project='group_vit',
             sync_tensorboard=True,
             name=osp.join(cfg.model_name, cfg.tag),
             dir=cfg.output,#wandb_output,
             config=OmegaConf.to_container(cfg, resolve=True),
-            resume='must'
+            #resume='must'
         )
     else:
         wandb = None
@@ -213,10 +213,15 @@ def train(cfg):
     dataset_train, dataset_val, \
         data_loader_train, data_loader_val = build_loader(cfg.data)
     data_loader_seg = build_seg_dataloader(build_seg_dataset(cfg.evaluate.seg))
+    
 
     logger.info(f'Creating model:{cfg.model.type}/{cfg.model_name}')
     model = build_model(cfg.model)
     model.cuda()
+    text_transform = build_text_transform(False, cfg.data.text_aug, with_dc=False)
+    if cfg.data.precompute_pad_mask:
+        padword_tokenized = text_transform(cfg.data.pad_word)
+        model.build_padtoken_embedding(padword_tokenized.cuda())
 
     if cfg.wandb and dist.get_rank() == 0:
         wandb.watch(model, log="all")

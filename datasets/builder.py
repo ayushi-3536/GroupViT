@@ -100,7 +100,7 @@ def build_loader(config):
 def build_loader_sync(config, is_train_assess=False):
     
     is_train = not is_train_assess
-    dataset_train = build_dataset_sync(is_train=is_train, config=config)
+    dataset_train, ttext_transform = build_dataset_sync(is_train=is_train, config=config)
     dataset_val = build_dataset_sync(is_train=False, config=config)
     dc_collate = partial(collate, samples_per_gpu=config.batch_size)
     train_len = len(dataset_train)
@@ -130,7 +130,7 @@ def build_loader_sync(config, is_train_assess=False):
     val_nbatches = max(1, val_len // (config.batch_size * 1))
     data_loader_val = (data_loader_val.with_epoch(val_nbatches).with_length(val_nbatches))
 
-    return dataset_train, dataset_val, data_loader_train, data_loader_val
+    return dataset_train, dataset_val, data_loader_train, data_loader_val, ttext_transform
 
 
 def warn_and_continue(exn):
@@ -244,6 +244,13 @@ def build_dataset_sync(is_train, config):
             .map_dict(image=img_transform, text=text_transform, handler=warn_and_continue)
             .with_length(total_length))
         print("dataset", type(dataset))
+        print(text_transform.transforms[0].token_to_text)
+        print(text_transform.transforms[0].text_to_subtext)
+        transforms = {
+            'token_to_text': text_transform.transforms[0].token_to_text,
+            'text_to_subtext': text_transform.transforms[0].text_to_subtext,
+        }
+        return dataset, transforms
 
         # from PIL import Image 
         # import PIL 
@@ -266,9 +273,10 @@ def build_dataset_sync(is_train, config):
             .slice(0, total_length, 0)
             .with_length(total_length))
         print(":dataset type", type(dataset))
+        return dataset
     # yapf: enable
-
-    return dataset
+    
+    
 
 def build_train_assessment_dataset(is_train, config):
     text_transform = build_text_transform(is_train, config.text_aug, with_dc=False, train_assessment=True)
@@ -389,7 +397,8 @@ def build_text_transform(is_train, config, with_dc=True, train_assessment=False)
             train_assessment=train_assessment,
             generate_prompt=config.generate_prompt,
             with_caption=config.with_caption,
-            max_length_fixed=config.max_length_fixed)
+            max_length_fixed=config.max_length_fixed,
+            use_pad_token=config.use_pad_token)
     else:
         transform = Tokenize(SimpleTokenizer(), max_seq_len=config.max_seq_len)
 
@@ -435,7 +444,7 @@ class Tokenize:
 class WordAugTokenizeWrapper:
 
     def __init__(self, tokenize, max_word=3, template_set='subset', word_type='noun', pre_computed_nouns=False,
-                  generate_prompt_for_np=True, train_assessment=False, generate_prompt=True, with_caption=True, max_length_fixed=True):
+                  generate_prompt_for_np=True, train_assessment=False, generate_prompt=True, with_caption=True, max_length_fixed=True, use_pad_token=False):
         self.tokenize = tokenize
         self.max_word = max_word
         from .imagenet_template import (full_imagenet_templates, sub_imagenet_template, simple_imagenet_template,
@@ -458,6 +467,8 @@ class WordAugTokenizeWrapper:
         self.train_assessment = train_assessment
         self.generate_prompt = generate_prompt
         self.with_caption = with_caption
+        self.token_to_text = {}
+        self.text_to_subtext = {}
         if self.pre_computed_nouns:
             import pickle
 
@@ -470,6 +481,7 @@ class WordAugTokenizeWrapper:
                 self.caption_nouns_dict = pickle.load(f)
         self.generate_prompt_for_np = generate_prompt_for_np
         self.max_length_fixed=max_length_fixed
+        self.use_pad_token=use_pad_token
 
     def get_tag(self, tokenized, tags):
         if not isinstance(tags, (list, tuple)):
@@ -538,12 +550,20 @@ class WordAugTokenizeWrapper:
             else:
                 texts = [noun for noun in nouns]
         if self.max_length_fixed and len(texts) < self.max_word and not self.train_assessment:
-            texts += [text] * (self.max_word - len(texts))
+            if self.use_pad_token:
+                texts += ['<PAD>'] * (self.max_word - len(texts))
+                #nouns += ['<PAD>'] * (self.max_word - len(nouns))
+            else:
+                texts += [text] * (self.max_word - len(texts))
+                #nouns += [text] * (self.max_word - len(nouns))
+        
+        # self.token_to_text[self.tokenize(text)] = text
+        # self.text_to_subtext[text] = nouns
         if self.train_assessment:
             texts = ['background'] + [text] + texts
         elif self.with_caption: 
             texts = [text] + texts
-        print("texts",texts)
+        #print("texts",texts)
         if self.train_assessment:
             return texts, self.tokenize(texts)
         else:

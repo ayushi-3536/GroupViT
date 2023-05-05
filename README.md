@@ -315,6 +315,7 @@ python convert_dataset/convert_coco.py local_data/data/coco/ -o local_data/data/
 
 Train on a single node:
 
+./tools/dist_launch.sh main_group_vit.py configs/tier_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/tier_ft
 
 ./tools/dist_launch.sh main_group_vit.py configs/gs1_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs1_all_75new
 

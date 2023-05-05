@@ -1,31 +1,6 @@
-# -------------------------------------------------------------------------
-# Swin Transformer
-# Copyright (c) 2021 Microsoft
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE
-#
-# Written by Ze Liu, Zhenda Xie
-# Modified by Jiarui Xu
-# -------------------------------------------------------------------------
-
+'''
+This is temp file that just loads the model to debug checkpoint loading
+'''
 import argparse
 import datetime
 import os
@@ -60,28 +35,6 @@ except ImportError:
 def parse_args():
     parser = argparse.ArgumentParser('GroupViT training and evaluation script')
     parser.add_argument('--cfg', default='configs/gs3_group_vit_gcc_yfcc_30e.yml', type=str, required=True, help='path to config file')
-    # parser.add_argument('--opts', help="Modify config options by adding 'KEY=VALUE' list. ", default=None, nargs='+')
-
-    # # easy config modification
-    # parser.add_argument('--batch-size', type=int, help='batch size for single GPU')
-    # parser.add_argument('--resume', help='resume from checkpoint')
-    # parser.add_argument(
-    #     '--amp-opt-level',
-    #     type=str,
-    #     default='O1',
-    #     choices=['O0', 'O1', 'O2'],
-    #     help='mixed precision opt level, if O0, no amp is used')
-    # parser.add_argument(
-    #     '--output', type=str, help='root of output folder, '
-    #     'the full path is <output>/<model_name>/<tag>')
-    # parser.add_argument('--tag', type=str, help='tag of experiment')
-    # parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
-    # parser.add_argument('--wandb', action='store_true', help='Use W&B to log experiments')
-    # parser.add_argument('--keep', type=int, help='Maximum checkpoint to keep')
-
-    # # distributed training
-    # parser.add_argument('--local_rank', type=int, required=True, help='local rank for DistributedDataParallel')
-
     args = parser.parse_args()
 
     return args

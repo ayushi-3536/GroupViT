@@ -52,7 +52,7 @@ def build_seg_inference(model, dataset, text_transform, config):
     kwargs = dict(with_bg=with_bg)
     if hasattr(cfg, 'test_cfg'):
         kwargs['test_cfg'] = cfg.test_cfg
-    seg_model = GroupViTSegInference(model, text_embedding, **kwargs)
+    seg_model = GroupViTSegInference(model, text_embedding, save_vis=config.save_visualization, **kwargs)
 
     seg_model.CLASSES = dataset.CLASSES
     seg_model.PALETTE = dataset.PALETTE
