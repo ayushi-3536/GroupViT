@@ -1,7 +1,10 @@
 data:
-  batch_size: 1
+  batch_size: 128
   pin_memory: true
-  num_workers: 1
+  num_workers: 2
+  precompute_pad_mask: true
+  pad_word: '<PAD>'
+
   # Thomas said it should be at least about 5-10x your batch size; beyond that,
   # the differences become academic.
   shuffle_buffer: 10000
@@ -60,19 +63,22 @@ data:
     re_count: 1
   text_aug:
     max_seq_len: 77
-    multi_label: 3
+    multi_label: 5 #number of nouns to be generated
     #word type could be noun, noun phrase or both
     word_type: 'noun_phrase'
     pre_generated_nouns: false
     #if not set then true
-    generate_prompt: false
+    generate_prompt: true
     #generate prompt would trump generate_prompt_for_np. Only if generate_prompt 
     #is true generate_prompt_for_np would be considered
     generate_prompt_for_np: true
     #if not set then true
-    with_caption: false
+    with_caption: true
     #if not set then always true
     max_length_fixed: true
+    #use pad token: <PAD> rather than caption to pad the text
+    use_pad_token: true
+    
 train:
   start_epoch: 0
   epochs: 30
@@ -96,6 +102,7 @@ train:
 
   finetune:
     only_grouping: true
+    #considered only if only_grouping is false
     freeze_text_encoder: false
 
   optimizer:
@@ -114,7 +121,8 @@ evaluate:
     save_best: true
     template: subset
   seg:
-    save_best: true
+    save_best: false
+    save_visualization: true
     #cfg: segmentation/configs/_base_/datasets/coco.py
     cfg: segmentation/configs/_base_/datasets/pascal_voc12.py
     #cfg: segmentation/configs/_base_/datasets/pascal_context.py
@@ -139,3 +147,5 @@ seed: 0
 wandb: true
 local_rank: ???
 vis: []
+
+file_extension: ['.png', '.pdf']

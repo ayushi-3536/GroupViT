@@ -20,7 +20,6 @@ from timm.loss import SoftTargetCrossEntropy
 from .builder import MODELS
 from .misc import Result
 
-
 def dist_collect(x):
     """ collect all tensor from all GPUs
     args:
@@ -117,7 +116,9 @@ class MultiLabelContrastive(nn.Module):
         if self.with_multi_label and not self.share_temperature:
             self.multi_label_logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / contrast_temperature))
         self.multi_label_loss_weight = multi_label_loss_weight
-
+        self.padtoken = None
+           
+            
     @property
     def with_multi_label(self):
         return self.multi_label > 0
@@ -168,6 +169,69 @@ class MultiLabelContrastive(nn.Module):
         return loss
 
     def multi_label_loss(self, image_feat, text_feat):
+        """
+
+        Args:
+            image_feat (torch.Tensor): shape [B, L1, C]
+            text_feat (torch.Tensor): shape [B, L2, C]
+
+        Returns:
+
+        """
+        # [B, L1, C], L1 = 1
+        image_feat = F.normalize(image_feat, dim=-1)
+        # [B, L2, C]
+        text_feat = F.normalize(text_feat, dim=-1)
+
+        # [B, L1, L2]
+        dist_per_img = image_feat @ rearrange(text_feat, 'b l c -> b c l')
+        # [B, L2, L1]
+        dist_per_text = text_feat @ rearrange(image_feat, 'b l c -> b c l')
+
+        if self.share_temperature:
+            logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+        else:
+            logit_scale = torch.clamp(self.multi_label_logit_scale.exp(), max=100)
+
+        batch = image_feat.shape[0]
+        img_len = image_feat.shape[1]
+        text_len = text_feat.shape[1]
+        # [B, L1, L2]
+        pos_labels_batch_img = rearrange(torch.ones_like(dist_per_text) / dist_per_text.size(1), 'b l2 l1 -> b l1 l2')
+        # [B, L2, L1]
+        pos_labels_batch_text = rearrange(torch.ones_like(dist_per_img) / dist_per_img.size(1), 'b l1 l2 -> b l2 l1')
+
+        image_x = rearrange(image_feat, 'b l c -> (b l) c')
+        text_x = rearrange(text_feat, 'b l c -> (b l) c')
+        
+        logits_per_img = image_x @ dist_collect(text_x).t()
+        logits_per_text = text_x @ dist_collect(image_x).t()
+        
+        # get label globally
+        # [B, L1, B, L2, W]
+        labels_per_img = F.one_hot(
+            torch.ones(batch, img_len, batch, text_len, dtype=torch.long, device=image_x.device) * dist.get_rank(),
+            num_classes=dist.get_world_size()).to(image_x.dtype)
+        labels_per_img *= rearrange(pos_labels_batch_img, 'b l1 l2 -> b l1 1 l2 1') * repeat(
+            torch.eye(batch, dtype=image_x.dtype, device=image_x.device), 'b1 b2 -> b1 1 b2 1 1')
+        # [BxL1, WxBxL2]
+        labels_per_img = rearrange(labels_per_img, 'b1 l1 b2 l2 w -> (b1 l1) (w b2 l2)')
+        # [B, L2, B, L1, W]
+        labels_per_text = F.one_hot(
+            torch.ones(batch, text_len, batch, img_len, dtype=torch.long, device=text_x.device) * dist.get_rank(),
+            num_classes=dist.get_world_size()).to(text_x.dtype)
+        labels_per_text *= rearrange(pos_labels_batch_text, 'b l2 l1 -> b l2 1 l1 1') * repeat(
+            torch.eye(batch, dtype=text_x.dtype, device=image_x.device), 'b2 b1 -> b2 1 b1 1 1')
+        # [BxL2, WxBxL1]
+        labels_per_text = rearrange(labels_per_text, 'b2 l2 b1 l1 w -> (b2 l2) (w b1 l1)')
+
+        loss_img = self.soft_cross_entropy(logits_per_img * logit_scale, labels_per_img)
+        loss_text = self.soft_cross_entropy(logits_per_text * logit_scale, labels_per_text)
+
+        loss = 0.5 * (loss_img + loss_text)
+
+        return loss
+    def entropy_loss(self, image_feat, text_feat):
         """
 
         Args:
@@ -304,9 +368,16 @@ class MultiLabelContrastive(nn.Module):
         return outs.as_return()
 
     def encode_text(self, text, *, as_dict=False):
-        assert text.ndim in [2, 3], text.ndim
+        assert text.ndim in [2, 3], text.ndim        
         squeeze_dim = False
         num_text = 1
+
+        # "compare pad token with all token in text and remove the ones similar to pad_token"
+        # if self.remove_pad_token:
+        #     for i in range(text.shape[0]):
+        #         text[i, :] = text[i, :][text[i, :] != self.pad_token]  
+          
+
         if text.ndim == 3:
             num_text = text.shape[1]
             text = rearrange(text, 'b n l -> (b n) l', n=num_text)
@@ -329,7 +400,16 @@ class MultiLabelContrastive(nn.Module):
         image_outs = self.encode_image(image, as_dict=True)
         # [B, C]
         image_x = image_outs['image_x']
-
+        # if self.padtoken is not None:
+        #     mask_tensor = text.eq(self.padtoken).all(dim=-1)
+        #     #print("mask tensor", mask_tensor)
+        #     binary_mask = mask_tensor.unsqueeze(-1).repeat(1, 1, text.shape[-1])
+        #     # Apply the mask to the text tensor
+        #     #print("binary mask", binary_mask)
+            
+        #     #print("text before", text)
+        #     text.masked_fill_(binary_mask, 0)
+            #print("text after", text)
         text_outs = self.encode_text(text, as_dict=True)
         # [B, C]
         text_x = text_outs['text_x']
@@ -340,6 +420,16 @@ class MultiLabelContrastive(nn.Module):
         if self.with_multi_label:
             image_multi_label_x = image_x.unsqueeze(1)
             text_multi_label_x = text_outs['text_multi_label_x']
+            #text_multi_label_x_masked = text_multi_label_x.masked_scatter_(binary_mask[:,1:].sum(dim=-1).bool().unsqueeze(-1), self.PAD_EMBEDDING.expand(text_multi_label_x.shape[0], text_multi_label_x.shape[1], self.PAD_EMBEDDING.shape[-1]).to(text_multi_label_x.dtype))
+            # print("text multi labelbefore", text_multi_label_x)
+            
+            # print("text multi label after", text_multi_label_x_masked)
+            
+            # losses_dict['multi_label_loss'] = self.multi_label_loss_sync(image_multi_label_x,
+            #                                                         text_multi_label_x_masked) * self.multi_label_loss_weight
+            # losses_dict['testmulti_label_loss'] = self.multi_label_loss_sync(image_multi_label_x,
+            #                                                         text_multi_label_x) * self.multi_label_loss_weight
+
             losses_dict['multi_label_loss'] = self.multi_label_loss(image_multi_label_x,
                                                                     text_multi_label_x) * self.multi_label_loss_weight
 
@@ -349,7 +439,18 @@ class MultiLabelContrastive(nn.Module):
         # [B, C]
         image_x = image_outs['image_x']
 
+        # if self.padtoken is not None:
+        #     mask_tensor = text.eq(self.padtoken).all(dim=-1)
+        #     print("mask tensor", mask_tensor)
+        #     binary_mask = mask_tensor.unsqueeze(-1).repeat(1, 1, text.shape[-1])
+        #     # Apply the mask to the text tensor
+        #     print("binary mask", binary_mask)
+            
+        #     print("text before", text)
+        #     text.masked_fill_(binary_mask, 0)
+        #     print("text after", text)
         text_outs = self.encode_text(text, as_dict=True)
+
         # [B, C]
         text_x = text_outs['text_x']
 
@@ -359,8 +460,20 @@ class MultiLabelContrastive(nn.Module):
         if self.with_multi_label:
             image_multi_label_x = image_x.unsqueeze(1)
             text_multi_label_x = text_outs['text_multi_label_x']
+            # print("text multi label before", text_multi_label_x)
+            # print("bms", binary_mask[:,1:].shape)
+            # print("bm",binary_mask[:,1:].sum(dim=-1).bool().unsqueeze(-1).shape)
+            # print("bm",binary_mask[:,1:].sum(dim=-1).bool().unsqueeze(-1))
+            #print("text multi label after", text_multi_label_x_masked)
+            # losses_dict['multi_label_loss'] = self.multi_label_loss_sync(image_multi_label_x,
+            #                                                         text_multi_label_x) * self.multi_label_loss_weight
+            # text_multi_label_x_masked = text_multi_label_x.masked_scatter_(binary_mask[:,1:].sum(dim=-1).bool().unsqueeze(-1), self.PAD_EMBEDDING.expand(text_multi_label_x.shape[0], text_multi_label_x.shape[1], self.PAD_EMBEDDING.shape[-1]))
+            # losses_dict['multi_label_loss'] = self.multi_label_loss_sync(image_multi_label_x,
+            #                                                         text_multi_label_x_masked) * self.multi_label_loss_weight
             losses_dict['multi_label_loss'] = self.multi_label_loss_sync(image_multi_label_x,
                                                                     text_multi_label_x) * self.multi_label_loss_weight
+
+
 
         return losses_dict
     def forward_test(self, image, text):
@@ -373,6 +486,16 @@ class MultiLabelContrastive(nn.Module):
             return self.forward_train_sync(image, text)
         else:
             return self.forward_test(image, text)
+
+    @torch.no_grad()
+    def build_padtoken_embedding(self, padtoken):
+        """
+        Args: padtoken (torch.Tensor): [1, CONTEXT_LENGTH]
+
+        """
+        self.padtoken = padtoken
+        self.PAD_EMBEDDING = torch.zeros(1, self.text_encoder.width, dtype=torch.float32).cuda()
+
 
     @torch.no_grad()
     def build_text_embedding(self, text):

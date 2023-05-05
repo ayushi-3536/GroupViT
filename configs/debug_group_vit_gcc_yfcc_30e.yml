@@ -1,15 +1,16 @@
 _base_: 'default.yml'
 data:
+  batch_size: 2
   text_aug:
     multi_label: 5
     pre_generated_nouns: false
     generate_prompt_for_np: true
 
 model:
-  type: MultiLabelContrastive_PACL
+  type: MultiLabelContrastive
   debugging: True
   img_encoder:
-    type: GroupViT_PACL
+    type: GroupViT
     embed_dim: 384
     num_heads: [6, 6, 6]
     depths: [6, 3, 3]
@@ -27,3 +28,21 @@ model:
   proj_num_layers: 2
   output_dim: 256
   multi_label: ${data.text_aug.multi_label}
+
+evaluate:
+  eval_only: false
+  eval_freq: 1
+  task:
+    #- cls
+    - seg
+  cls:
+    save_best: true
+    template: subset
+  seg:
+    save_best: true
+    save_visualization: true
+    #cfg: segmentation/configs/_base_/datasets/coco.py
+    cfg: segmentation/configs/_base_/datasets/pascal_voc12.py
+    #cfg: segmentation/configs/_base_/datasets/pascal_context.py
+    template: simple
+    opts: []

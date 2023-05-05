@@ -1,16 +1,18 @@
 _base_: 'default.yml'
-# data:
-#   text_aug:
-#     multi_label: 5
-#     pre_generated_nouns: false
-#     generate_prompt: false
-#     #generate prompt would trump generate_prompt_for_np. Only if generate_prompt 
-#     #is true generate_prompt_for_np would be considered
-#     generate_prompt_for_np: true
-#     with_caption: true
+#data:
+  # text_aug:
+  #   multi_label: 10
+  #   pre_generated_nouns: false
+  #   generate_prompt: false
+  #   #generate prompt would trump generate_prompt_for_np. Only if generate_prompt 
+  #   #is true generate_prompt_for_np would be considered
+  #   generate_prompt_for_np: true
+  #   with_caption: true
 model:
   type: MultiLabelContrastive
-  debugging: True
+  ### This disable parallelization of the model
+  debugging: False
+
   img_encoder:
     type: GroupViT
     embed_dim: 384

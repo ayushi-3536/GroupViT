@@ -32,6 +32,7 @@ from .builder import MODELS
 from .misc import Result
 from .utils import ResidualAttentionBlock
 
+from datasets import build_text_transform
 
 class Transformer(nn.Module):
 
@@ -70,6 +71,7 @@ class TextTransformer(nn.Module):
         layers: int,
         vocab_size,
         use_checkpoint=False,
+        use_pad=True
     ):
 
         super().__init__()
@@ -91,6 +93,10 @@ class TextTransformer(nn.Module):
         # initialization
         nn.init.normal_(self.positional_embedding, std=0.01)
 
+        self.use_pad = use_pad
+        if self.use_pad:
+            self.padding_embedding = nn.Parameter(torch.empty(1, width))
+            
     def build_attention_mask(self):
         # lazily create causal attention mask, with full attention between the vision tokens
         # pytorch uses additive attention mask; fill with -inf
@@ -100,18 +106,20 @@ class TextTransformer(nn.Module):
         return mask
 
     def forward(self, text, *, as_dict=False):
-        x = self.token_embedding(text)
-        outs = Result(as_dict=as_dict)
-        x = x + self.positional_embedding
-        x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
-        x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_final(x)
+            outs = Result(as_dict=as_dict)
+        # if self.use_pad and text == self.pad_word:
+        #     x = self.padding_embedding
+        # else:
+            x = self.token_embedding(text)
+            x = x + self.positional_embedding
+            x = x.permute(1, 0, 2)  # NLD -> LND
+            x = self.transformer(x)
+            x = x.permute(1, 0, 2)  # LND -> NLD
+            x = self.ln_final(x)
 
-        # x.shape = [batch_size, n_ctx, transformer.width]
-        # take features from the eot embedding (eot_token is the highest number in each sequence)
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)]
+            # x.shape = [batch_size, n_ctx, transformer.width]
+            # take features from the eot embedding (eot_token is the highest number in each sequence)
+            x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)]
 
-        outs.append(x, name='x')
-
-        return outs.as_return()
+            outs.append(x, name='x')
+            return outs.as_return()
