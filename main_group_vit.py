@@ -60,7 +60,6 @@ def parse_args():
     parser = argparse.ArgumentParser('GroupViT training and evaluation script')
     parser.add_argument('--cfg', type=str, required=True, help='path to config file')
     parser.add_argument('--opts', help="Modify config options by adding 'KEY=VALUE' list. ", default=None, nargs='+')
-
     # easy config modification
     parser.add_argument('--batch-size', type=int, help='batch size for single GPU')
     parser.add_argument('--resume', help='resume from checkpoint')
@@ -164,7 +163,6 @@ def write_model_iteration(cfg, data_loader_train, model):
         num_text = text_sample_data.shape[1]
         text_sample_data = rearrange(text_sample_data, 'b n l -> (b n) l', n=num_text)
         squeeze_dim = True
-    logger.info('text sample data', text_sample_data.shape)
     text_sample_data.requires_grad = False
     for para in img_model.parameters():
         para.required_grad = False
@@ -184,7 +182,6 @@ def write_model_iteration(cfg, data_loader_train, model):
         text_input = rearrange(text_input, 'b n l -> (b n) l', n=num_text)
         squeeze_dim = True
     
-    logger.info('text sample data', text_input)
     
     #writer.add_graph(text_model, text_input)#text_input)
     with amp.disable_casts():
@@ -197,15 +194,24 @@ def train(cfg):
     logger = get_logger()
     if cfg.wandb and dist.get_rank() == 0:
         import wandb
-        wandb.init(
-            id='iaun1h5n',
-            project='group_vit',
-            sync_tensorboard=True,
-            name=osp.join(cfg.model_name, cfg.tag),
-            dir=cfg.output,#wandb_output,
-            config=OmegaConf.to_container(cfg, resolve=True),
-            resume='must'
-        )
+        if cfg.wandb_id:
+            wandb.init(
+                id=cfg.wandb_id,
+                project='group_vit',
+                sync_tensorboard=True,
+                name=osp.join(cfg.model_name, cfg.tag),
+                dir=cfg.output,#wandb_output,
+                config=OmegaConf.to_container(cfg, resolve=True),
+                resume='must'
+            )
+        else:
+            wandb.init(
+                project='group_vit',
+                sync_tensorboard=True,
+                name=osp.join(cfg.model_name, cfg.tag),
+                dir=cfg.output,#wandb_output,
+                config=OmegaConf.to_container(cfg, resolve=True),
+            )
     else:
         wandb = None
     # waiting wandb init
@@ -221,7 +227,7 @@ def train(cfg):
     if cfg.wandb and dist.get_rank() == 0:
         wandb.watch(model, log="all")
         
-    #logger.info(str(model))
+    logger.info(str(model))
 
     optimizer = build_optimizer(cfg.train, model)
     if cfg.train.amp_opt_level != 'O0':
@@ -244,32 +250,37 @@ def train(cfg):
         else:
             logger.info(f'no checkpoint found in {cfg.output}, ignoring auto resume')
 
+    
     max_accuracy = max_miou = 0.0
     max_metrics = {'max_accuracy': max_accuracy, 'max_miou': max_miou}
+    text_transform = build_text_transform(False, cfg.data.text_aug, with_dc=False)
+    if cfg.data.precompute_pad_mask:
+        padword_tokenized = text_transform(cfg.data.pad_word)
+        model_without_ddp.build_padtoken_embedding(padword_tokenized)
 
     if cfg.checkpoint.resume:
         max_metrics = load_checkpoint(cfg, model_without_ddp, optimizer, lr_scheduler)
         max_accuracy, max_miou = max_metrics['max_accuracy'], max_metrics['max_miou']
-        if 'cls' in cfg.evaluate.task:
-            acc1, acc5, loss = validate_cls(cfg, data_loader_val, model)
-            logger.info(f'Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%')
-        if 'seg' in cfg.evaluate.task:
-            miou = validate_seg(cfg, data_loader_seg, model)
-            logger.info(f'mIoU of the network on the {len(data_loader_seg.dataset)} test images: {miou:.2f}%')
-            if wandb is not None:
-                log_stat = {}
-                log_stat.update({
-                    'epoch/val_miou': miou,
-                    'epoch/epoch': -1,
-                    'epoch/n_parameters': n_parameters
-                })
-                wandb.log(log_stat)
+        # if 'cls' in cfg.evaluate.task:
+        #     acc1, acc5, loss = validate_cls(cfg, data_loader_val, model)
+        #     logger.info(f'Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%')
+        # if 'seg' in cfg.evaluate.task:
+        #     miou = validate_seg(cfg, data_loader_seg, model)
+        #     logger.info(f'mIoU of the network on the {len(data_loader_seg.dataset)} test images: {miou:.2f}%')
+        #     if wandb is not None:
+        #         log_stat = {}
+        #         log_stat.update({
+        #             'epoch/val_miou': miou,
+        #             'epoch/epoch': -1,
+        #             'epoch/n_parameters': n_parameters
+        #         })
+        #         wandb.log(log_stat)
 
         if cfg.evaluate.eval_only:
             return
 
 
-    write_model_iteration(cfg, data_loader_train, model)
+    #write_model_iteration(cfg, data_loader_train, model)
 
     
     logger.info('Start training')
@@ -283,6 +294,7 @@ def train(cfg):
         torch.cuda.empty_cache()
         logger.debug(f'epoch:{epoch}')
         loss_train_dict = train_one_epoch(cfg, model, data_loader_train, optimizer, epoch, lr_scheduler)
+        print('loss_train_dict', loss_train_dict)
         if dist.get_rank() == 0 and (epoch % cfg.checkpoint.save_freq == 0 or epoch == (cfg.train.epochs - 1)):
             save_checkpoint(cfg, epoch, model_without_ddp, {
                 'max_accuracy': max_accuracy,
@@ -382,13 +394,15 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
 
         losses = model(**samples)
-
         loss, log_vars = parse_losses(losses)
-
         if config.train.accumulation_steps > 1:
             loss = loss / config.train.accumulation_steps
             if config.train.amp_opt_level != 'O0':
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    
+                    # check whether loss requires grad or not
+                    #set requires grad to true
+                    scaled_loss.requires_grad = True
                     scaled_loss.backward()
                 if config.train.clip_grad:
                     grad_norm = torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), config.train.clip_grad)
@@ -408,6 +422,10 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
             optimizer.zero_grad()
             if config.train.amp_opt_level != 'O0':
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    # check whether loss requires grad or not
+                    
+                    #scaled_loss.requires_grad = True
+
                     scaled_loss.backward()
                 if config.train.clip_grad:
                     grad_norm = torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), config.train.clip_grad)
@@ -647,4 +665,20 @@ def main():
 
 
 if __name__ == '__main__':
+    import random
+    import numpy as np
+
+    seed = 123
+
+    # Set the random seed for Python's random module
+    random.seed(seed)
+
+    # Set the random seed for numpy
+    np.random.seed(seed)
+
+    # Set the random seed for PyTorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     main()

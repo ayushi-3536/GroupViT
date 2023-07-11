@@ -89,14 +89,14 @@ def inference(cfg):
 
     load_checkpoint(cfg, model, None, None)
 
-    # if 'seg' in cfg.evaluate.task:
-    #     miou = validate_seg(cfg, data_loader, model)
-    #     logger.info(f'mIoU of the network on the {len(data_loader.dataset)} test images: {miou:.2f}%')
-    # else:
+    #if 'seg' in cfg.evaluate.task:
+    # miou = validate_seg(cfg, data_loader, model)
+    # logger.info(f'mIoU of the network on the {len(data_loader.dataset)} test images: {miou:.2f}%')
+    # # else:
     #     logger.info('No segmentation evaluation specified')
 
-    #if cfg.vis:
-    vis_seg(cfg, data_loader, model, cfg.vis)
+    if cfg.vis:
+        vis_seg(cfg, data_loader, model, cfg.vis)
 
 
 @torch.no_grad()

@@ -47,7 +47,7 @@ from copy import deepcopy
 def find_mismatch_index(tensor1, tensor2):
     '''
     This function finds the first dimension of the mismatched dimensions between two tensor
-    For our limited usecase, there is always one mismatched dimension
+    For our limited usecase, there is always only one mismatched dimension
     '''
     if tensor1.shape != tensor2.shape:
         mismatch_index = []
@@ -123,6 +123,52 @@ def create_model_dict(config, checkpoint):
             model_dict[key] = value
     return model_dict
 
+def interpolate_posembed(posemb, num_tokens: int):
+  """Interpolate given positional embedding parameters into a new shape.
+
+  Args:
+    posemb: positional embedding parameters.
+    num_tokens: desired number of tokens.
+    has_class_token: True if the positional embedding parameters contain a
+      class token.
+
+  Returns:
+    Positional embedding parameters interpolated into the new shape.
+  """
+  import scipy.ndimage
+  import numpy as np
+  assert posemb.shape[0] == 1
+  posemb_tok, posemb_grid = posemb[:, :0], posemb[0, 0:]
+  logger = get_logger()
+  gs_old = int(np.sqrt(len(posemb_grid)))
+  gs_new = int(np.sqrt(num_tokens))
+  logger.info('interpolate_posembed: grid-size from %s to %s', gs_old, gs_new)
+  assert gs_old ** 2 == len(posemb_grid), f'{gs_old ** 2} != {len(posemb_grid)}'
+  assert gs_new ** 2 == num_tokens, f'{gs_new ** 2} != {num_tokens}'
+  posemb_grid = posemb_grid.reshape(gs_old, gs_old, -1)
+
+  zoom = (gs_new / gs_old, gs_new / gs_old, 1)
+  posemb_grid = scipy.ndimage.zoom(posemb_grid, zoom, order=1)
+  posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
+  
+  logger.info(f'new grid size: {posemb_grid.shape[1]}')
+  new_posembed = np.concatenate([posemb_tok, posemb_grid], axis=1)
+  logger.info(f'new positional embedding shape: {new_posembed.shape}')
+  #convert new pos embed to torch tensor
+  return torch.from_numpy(new_posembed)
+
+def interpolate_pos_embed(pos_embed, pos_embed_new):
+    '''
+    This function is used to interpolate the positional embedding from the previous checkpoint to the new checkpoint
+    '''
+    logger = get_logger()
+    logger.info(f'Interpolating positional embedding from {pos_embed.shape} to {pos_embed_new.shape}')
+    # interpolate the positional embedding from the previous checkpoint to the new checkpoint
+    pos_embed_new[:, :pos_embed.shape[1]] = pos_embed
+    if pos_embed.shape[1] > pos_embed_new.shape[1]:
+        pos_embed_new[:, pos_embed_new.shape[1]:] = pos_embed[:, :pos_embed_new.shape[1]]
+    return pos_embed_new
+
 def load_checkpoint(config, model, optimizer, lr_scheduler, allow_shape_change: bool=False):
     logger = get_logger()
     logger.info(f'==============> Resuming form {config.checkpoint.resume}....................')
@@ -131,8 +177,10 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, allow_shape_change: 
     '''
     Key mapper is used to transfer weights optimally while training hierarchies other than standard 2 layer hierarchy
     '''
+    print("config", config.checkpoint)
     if config.checkpoint.key_mapper:
         model_dict = create_model_dict(config, checkpoint)
+        print("model_dict", model_dict.keys())
     if config.checkpoint.key_mapper and model_dict:
         if not allow_shape_change:
             msg = model.load_state_dict(model_dict, strict=False)   
@@ -153,6 +201,26 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, allow_shape_change: 
             logger.info(f'missing keys: {missing_keys} ')
 
             msg = model.load_state_dict(model_dict, strict=False)   
+            logger.info("msg", msg)
+            logger.info("msg len missing - incompatible keys", len(msg.missing_keys))
+    elif config.checkpoint.interpolate_pos_embedding:
+        logger.info("Interpolating position embedding")
+        model_dict = checkpoint['model']
+        
+        pos_embed = model_dict['img_encoder.pos_embed']
+        #check if pos_embed is in img_encoder
+        pos_embed_new = model.img_encoder.pos_embed
+        logger.info(f'pos_embed shape: {pos_embed.shape}')
+        logger.info(f'pos_embed_new shape: {pos_embed_new.shape}')
+        if pos_embed.shape != pos_embed_new.shape:
+            #pos_embed_new = interpolate_pos_embed(pos_embed, pos_embed_new)
+            pos_embed_new = interpolate_posembed(pos_embed, pos_embed_new.shape[1])
+            model_dict['img_encoder.pos_embed'] = pos_embed_new
+            msg = model.load_state_dict(model_dict, strict=False)
+            logger.info("msg", msg)
+            logger.info("msg len missing - incompatible keys", len(msg.missing_keys))
+        else:
+            msg = model.load_state_dict(model_dict, strict=False)
             logger.info("msg", msg)
             logger.info("msg len missing - incompatible keys", len(msg.missing_keys))
     else:
@@ -214,7 +282,7 @@ def save_checkpoint(config, epoch, model, metrics, optimizer, lr_scheduler, suff
 
     if len(suffix) > 0 and not suffix.startswith('_'):
         suffix = '_' + suffix
-    filename = f'ckpt_epoch{suffix}.pth'
+    filename = f'ckpt_epoch_{epoch}{suffix}.pth'
 
     save_path = os.path.join(config.output, filename)
     logger.info(f'{save_path} saving......')

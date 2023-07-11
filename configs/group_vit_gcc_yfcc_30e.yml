@@ -10,7 +10,7 @@ _base_: 'default.yml'
 #     with_caption: true
 model:
   type: MultiLabelContrastive
-  debugging: True
+  debugging: False
   img_encoder:
     type: GroupViT
     embed_dim: 384

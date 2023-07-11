@@ -85,6 +85,8 @@ pip install tensorboard
 python demo/demo_seg.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis input_pred_label final_group --input demo/examples/voc.jpg --output_dir demo/output
 ```
 
+python scripts/debug_training.py --cfg configs/DINOentropy_group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth 
+
 python demo/train_assessment.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis  final_group_pred --output_dir demo/output/originalfix
 
 python demo/seg_evaluation.py --cfg configs/group_vit_gcc_yfcc_30e.yml --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --vis  input pred input_pred all_groups first_group final_group input_pred_label  --output_dir demo/output/originalfix --dataset voc
@@ -312,10 +314,15 @@ python convert_dataset/convert_coco.py local_data/data/coco/ -o local_data/data/
 ## Run Experiments
 
 ### Pre-train
+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
+
 
 Train on a single node:
 
+./tools/dist_launch.sh main_group_vit.py configs/simlossDINO_feat_distill_gvit.yml 1 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/dinoinf
 
+./tools/dist_launch.sh new_run_gvit.py configs/upper_limit_dataloader_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --opts train.finetune.only_grouping=true --output /misc/lmbraid21/sharmaa/outputs/gs2_ul
+_new
 ./tools/dist_launch.sh main_group_vit.py configs/gs1_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs1_all_75new
 
 ./tools/dist_launch.sh main_group_vit.py configs/gs1_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/outputs/gs1_allparam/checkpoint.pth --output /misc/lmbraid21/sharmaa/outputs/gs1_finetunaftertrainingfor10epoch
@@ -323,6 +330,8 @@ Train on a single node:
 ./tools/dist_launch.sh main_group_vit.py configs/gs3_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs3_ft_grouping_lropttuned_0.01
 
 ./tools/dist_launch.sh main_group_vit.py configs/rt_gs3_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs3afterremapping_rt
+
+./tools/dist_launch.sh main_group_vit.py configs/rt_gs3_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth
 
 ./tools/dist_launch.sh test_trainable_param.py configs/gs3_group_vit_gcc_yfcc_30e.yml 
 
@@ -334,10 +343,23 @@ python test_trainable_param.py --cfg configs/gs3_group_vit_gcc_yfcc_30e.yml
 
 ./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 4 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_allparam_lrtuned
 
-./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 4 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/gs2_allparam_lrtuned
+./tools/dist_launch.sh main_group_vit.py configs/DINO_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/dinogvitentropy
+
+./tools/dist_launch.sh main_group_vit.py configs/DINO_feat_distill.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/dinofeat_distill_test
+
+./tools/dist_launch.sh main_group_vit.py configs/DINOnotrain.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/dinonotrain
+./tools/dist_launch.sh main_group_vit.py configs/DINOGS2_group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/dinogs2vitentropy
+
+ ./tools/dist_launch.sh main_group_vit.py configs/simlossDINO_feat_distill_gvit.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/celoss_predownsamplingfeat
+ ./tools/dist_launch.sh main_group_vit.py configs/celossDINO_feat_distill_gvit.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/celoss_softattn_dinofeatsoftmaxdim1
+
+  ./tools/dist_launch.sh main_group_vit.py configs/celossDINO_feat_distill_gvit.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/celoss_simmat
 
 ./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/test
-./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/onlycaption
+
+./tools/dist_launch.sh main_group_vit.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/test
+
+./tools/dist_launch.sh feat_group_vit_dino.py configs/group_vit_gcc_yfcc_30e.yml 2 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/outputs/dino
 ```shell
 (node0)$ ./tools/dist_launch.sh main_group_vit.py /path/to/config $GPUS_PER_NODE
 ```
@@ -380,7 +402,7 @@ We used 16 NVIDIA V100 GPUs for pre-training (in 2 days) in our paper.
 ./tools/dist_launch.sh main_seg.py /path/to/config $NUM_GPUS --resume /path/to/checkpoint
 ```
 
-./tools/dist_launch.sh main_seg.py configs/group_vit_gcc_yfcc_30e.yml 1 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/checkpoints/
+./tools/dist_launch.sh main_seg.py configs/group_vit_gcc_yfcc_30e.yml 1 --resume /misc/lmbraid21/sharmaa/checkpoints/group_vit_gcc_yfcc_30e-879422e0.pth --output /misc/lmbraid21/sharmaa/visualizationresults/originalcheckpoint_coco --vis entropy_map
 #
 #/misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4/ckpt_epoch_11_best_miou.pth
 #/misc/lmbraid21/sharmaa/outputs/yfcc_wandb_enabled_64*4/checkpoint.pth

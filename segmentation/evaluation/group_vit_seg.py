@@ -13,7 +13,6 @@ import os.path as osp
 import matplotlib.pyplot as plt
 import mmcv
 import numpy as np
-
 import os
 import torch
 import torch.nn.functional as F
@@ -21,25 +20,18 @@ from einops import rearrange
 from mmseg.models import EncoderDecoder
 from PIL import Image
 from utils import get_logger
-import os
-import sys
-import argparse
 import cv2
 import random
 import colorsys
-import requests
 from io import BytesIO
-import skimage.io
 from skimage.measure import find_contours
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 import torch
 import torch.nn as nn
-import torchvision
 from torchvision import transforms as pth_transforms
 import numpy as np
 from PIL import Image
-import utils
 
 GROUP_PALETTE = np.loadtxt(osp.join(osp.dirname(osp.abspath(__file__)), 'group_palette.txt'), dtype=np.uint8)[:, ::-1]
 
@@ -99,7 +91,7 @@ def display_instances(image, mask, fname="test", figsize=(5, 5), blur=False, con
                 ax.add_patch(p)
     ax.imshow(masked_image.astype(np.uint8), aspect='auto')
     fig.savefig(fname)
-    print(f"{fname} saved.")
+    #print(f"{fname} saved.")
     return
 
 def resize_attn_map(attentions, h, w, align_corners=False):
@@ -123,6 +115,9 @@ def resize_attn_map(attentions, h, w, align_corners=False):
     else:
         h_featmap = h // int(np.round(scale))
         w_featmap = attentions.shape[2] // h_featmap
+
+    print(f'attention map size: {attentions.shape}')
+    
     assert attentions.shape[
         2] == h_featmap * w_featmap, f'{attentions.shape[2]} = {h_featmap} x {w_featmap}, h={h}, w={w}'
 
@@ -198,7 +193,7 @@ def seg2coord(seg_map):
 
 class GroupViTSegInference(EncoderDecoder):
 
-    def __init__(self, model, text_embedding, with_bg, test_cfg=dict(mode='whole', bg_thresh=.1)):
+    def __init__(self, model, text_embedding, with_bg, test_cfg=dict(mode='whole', bg_thresh=.9)):
         super(EncoderDecoder, self).__init__()
         if not isinstance(test_cfg, mmcv.Config):
             test_cfg = mmcv.Config(test_cfg)
@@ -208,7 +203,8 @@ class GroupViTSegInference(EncoderDecoder):
         # [N, C]
         self.register_buffer('text_embedding', text_embedding)
         self.with_bg = with_bg
-        self.bg_thresh = 0.5 #test_cfg['bg_thresh']
+        self.bg_thresh = test_cfg['bg_thresh']
+        #print('bg_thresh', self.bg_thresh)
         if self.with_bg:
             self.num_classes = len(text_embedding) + 1
         else:
@@ -244,13 +240,19 @@ class GroupViTSegInference(EncoderDecoder):
                 # B: batch size (1), nH: number of heads, G: number of group token
                 attn_masks = attn_dict['soft']
                 # [B, nH, G, HxW] -> [B, nH, HxW, G]
+                #print('attn_masks before', attn_masks.shape)
                 attn_masks = rearrange(attn_masks, 'b h g n -> b h n g')
+                #print('attn_masks after', attn_masks.shape)
                 if prev_attn_masks is None:
                     prev_attn_masks = attn_masks
                 else:
+                    #print('attn_masks', attn_masks.shape)
+                    #print('prev_attn_masks', prev_attn_masks.shape)
                     prev_attn_masks = prev_attn_masks @ attn_masks
-                # [B, nH, HxW, G] -> [B, nH, H, W, G]
+                #[B, nH, HxW, G] -> [B, nH, H, W, G]
                 attn_maps.append(resize_attn_map(prev_attn_masks, *img.shape[-2:]))
+                #attn_maps.append(resize_attn_map(attn_masks, *img.shape[-2:]))
+
 
         for i in range(len(attn_maps)):
             attn_map = attn_maps[i]
@@ -275,6 +277,7 @@ class GroupViTSegInference(EncoderDecoder):
 
     def save_heat_maps(self, data, file_path, title):
         fig, ax = plt.subplots()
+        data = data.cpu().numpy()
         im = ax.imshow(data, cmap='viridis')
         cbar = ax.figure.colorbar(im, ax=ax)
         ax.set_title(title)
@@ -297,6 +300,8 @@ class GroupViTSegInference(EncoderDecoder):
             """
             fig, ax = plt.subplots()
             if np.any(attn_map[:, :, index] != 0):
+                print("index", index)
+                print('attn_map[:, :, index]', attn_map[:, :, index].shape)
                 im = ax.imshow(attn_map[:, :, index], cmap='viridis')
                 cbar = ax.figure.colorbar(im, ax=ax)
                 # This code is used to plot the data for each group/class.
@@ -308,6 +313,80 @@ class GroupViTSegInference(EncoderDecoder):
                     ax.set_title(title.format(index))
                     plt.savefig(file_path.format(index))
                 plt.close()
+
+    def save_entropy_maps(self, attn_map, img):
+        """save attention map"""
+        attn_map_results_path = osp.join(self.output_dir, 'attn_map')
+        mmcv.mkdir_or_exist(attn_map_results_path)
+        attn_map_results_path = osp.join(attn_map_results_path,'attn_map{}.png')
+
+        for i in range(attn_map.shape[-1]):
+            print("index for attn map", i)
+            self.plot_attn_map(attn_map.detach().cpu().numpy(), i, attn_map_results_path, 'Group {}', format==False)
+
+        """calculate shannon entropy for each group"""
+        dist_attn_map = F.softmax(attn_map, dim=-1)
+        shannon_entropy = -dist_attn_map * torch.log(dist_attn_map)
+        sum_shannon_entropy = shannon_entropy[:-1].sum(dim=-1)
+
+        """save entropy map"""
+        entropy_map_path = osp.join(self.output_dir, 'entropy_map')
+        mmcv.mkdir_or_exist(entropy_map_path)
+        sum_entropy_map_path = osp.join(entropy_map_path, 'sum_entropy_map.png')
+        self.save_heat_maps(sum_shannon_entropy, sum_entropy_map_path, 'Sum Entropy Of Attention Map Distrubtion Across Groups')
+
+        img_outs = self.model.encode_image(img, return_feat=True, as_dict=True)
+        #print("img_outs", img_outs.keys())
+        # [B, L, C] -> [L, C]
+        grouped_img_tokens = img_outs['image_feat'].squeeze(0)
+        #print("grouped_img_tokens", grouped_img_tokens.shape)
+
+        img_avg_feat = img_outs['image_x']
+        #print("img_avg_feat", img_avg_feat.shape)
+        
+        # [G, C]
+        grouped_img_tokens = F.normalize(grouped_img_tokens, dim=-1)
+        img_avg_feat = F.normalize(img_avg_feat, dim=-1)
+
+        num_fg_classes = self.text_embedding.shape[0]
+        class_offset = 1 if self.with_bg else 0
+        text_tokens = self.text_embedding
+        num_classes = num_fg_classes + class_offset
+
+        logit_scale = torch.clamp(self.model.logit_scale.exp(), max=100)
+        # [G, N]
+        """calculate affinity matrix"""
+        group_affinity_mat = (grouped_img_tokens @ text_tokens.T) * logit_scale
+        pre_group_affinity_mat = F.softmax(group_affinity_mat, dim=-1)
+
+        """calculate average affinity matrix"""
+        avg_affinity_mat = (img_avg_feat @ text_tokens.T) * logit_scale
+        avg_affinity_mat = F.softmax(avg_affinity_mat, dim=-1)
+
+        """calculate group affinity for top-5 classes"""
+        affinity_mask = torch.zeros_like(avg_affinity_mat)
+        avg_affinity_topk = avg_affinity_mat.topk(dim=-1, k=min(5, num_fg_classes))
+        affinity_mask.scatter_add_(
+            dim=-1, index=avg_affinity_topk.indices, src=torch.ones_like(avg_affinity_topk.values))
+        group_affinity_mat.masked_fill_(~affinity_mask.bool(), float('-inf'))
+
+        group_affinity_mat = F.softmax(group_affinity_mat, dim=-1)
+
+        # TODO: check if necessary
+        group_affinity_mat *= pre_group_affinity_mat
+
+        
+        """calculate entropy of attention map distribution across classes"""
+        prob_affinity_value = (attn_map @ group_affinity_mat)
+        #print("affinity value", prob_affinity_value)
+        dist_prob_affinity_value = F.softmax(prob_affinity_value, dim=-1)
+        class_path = osp.join(self.output_dir, 'entropy_affinity')        
+        mmcv.mkdir_or_exist(class_path)
+        class_path = osp.join(class_path, 'class_entropy.png')
+        entropy = -torch.sum(dist_prob_affinity_value * torch.log(dist_prob_affinity_value), dim=-1)
+        self.save_heat_maps(entropy, class_path, 'Entropy Of Attention Map Distrubtion Across Classes')
+
+
 
     def save_all_visualization(self, results):
         attn_map = results['attention_map']
@@ -367,7 +446,7 @@ class GroupViTSegInference(EncoderDecoder):
 
         """calculate entropy of attention map distribution across classes"""
         prob_affinity_value = (attn_map @ group_affinity_mat)
-        print("affinity value", prob_affinity_value)
+        #print("affinity value", prob_affinity_value)
         dist_prob_affinity_value = F.softmax(prob_affinity_value, dim=-1)
         class_path = osp.join(self.output_dir, 'entropy_affinity')        
         mmcv.mkdir_or_exist(class_path)
@@ -381,6 +460,8 @@ class GroupViTSegInference(EncoderDecoder):
         map of the same size as input."""
 
         assert img.shape[0] == 1, 'batch size must be 1'
+        print("img shape", img.shape)
+        print("img_metas", img_metas)
 
         # [B, C, H, W], get the last one only
         attn_map = self.get_attn_maps(img, rescale=True)[-1]
@@ -398,12 +479,14 @@ class GroupViTSegInference(EncoderDecoder):
 
         logit_scale = torch.clamp(self.model.logit_scale.exp(), max=100)
 
-        img_outs = self.model.encode_image(img, return_feat=True, as_dict=True) #, cross_attn=False)
-        
+        img_outs = self.model.encode_image(img, return_feat=True, as_dict=True)
+        #print("img_outs", img_outs.keys())
         # [B, L, C] -> [L, C]
         grouped_img_tokens = img_outs['image_feat'].squeeze(0)
+        #print("grouped_img_tokens", grouped_img_tokens.shape)
 
         img_avg_feat = img_outs['image_x']
+        #print("img_avg_feat", img_avg_feat.shape)
         
         # [G, C]
         grouped_img_tokens = F.normalize(grouped_img_tokens, dim=-1)
@@ -432,6 +515,8 @@ class GroupViTSegInference(EncoderDecoder):
 
         """get similarity of patch and text"""
         pred_logits = torch.zeros(num_classes, *attn_map.shape[:2], device=img.device, dtype=img.dtype)
+        # print("pred_logits", pred_logits.shape)
+        # print("onehot_attn_map", onehot_attn_map.shape)
         pred_logits[class_offset:] = rearrange(onehot_attn_map @ group_affinity_mat, 'h w c -> c h w')
         affinity_value = (onehot_attn_map @ group_affinity_mat)
         max_affinity_value = affinity_value.max(dim=-1).values
@@ -439,14 +524,14 @@ class GroupViTSegInference(EncoderDecoder):
             bg_thresh = min(self.bg_thresh, group_affinity_mat.max().item())
             pred_logits[0, max_affinity_value < bg_thresh] = 1
 
-        dict_result = dict(attention_map=attn_map,
-                           onehot_attn_map=onehot_attn_map,
-                           group_affinity_mat=group_affinity_mat,
-                           pre_group_affinity_mat=pre_group_affinity_mat,
-                           avg_affinity_mat=avg_affinity_mat,
-                           affinity_value=affinity_value,
-                           pred_logits=pred_logits)
-        self.save_all_visualization(results=dict_result)
+        # dict_result = dict(attention_map=attn_map,
+        #                    onehot_attn_map=onehot_attn_map,
+        #                    group_affinity_mat=group_affinity_mat,
+        #                    pre_group_affinity_mat=pre_group_affinity_mat,
+        #                    avg_affinity_mat=avg_affinity_mat,
+        #                    affinity_value=affinity_value,
+        #                    pred_logits=pred_logits)
+        # self.save_all_visualization(results=dict_result)
 
         return pred_logits.unsqueeze(0)
 
@@ -463,7 +548,7 @@ class GroupViTSegInference(EncoderDecoder):
         color_seg = np.zeros((seg.shape[0], seg.shape[1], 3), dtype=np.uint8)
         for label, color in enumerate(palette):
             if only_label is not None and label != only_label:
-                #print(f"label:{label} is not equal to only_label:{only_label}")
+                ##print(f"label:{label} is not equal to only_label:{only_label}")
                 continue
             color_seg[seg == label, :] = color
         # convert to BGR
@@ -486,11 +571,12 @@ class GroupViTSegInference(EncoderDecoder):
     def set_output_dir(self, output_file_path):
         self.output_dir = output_file_path
 
+    
     def show_result(self, img_show, img_tensor, result, out_file, vis_mode='input'):
 
         assert vis_mode in [
             'input', 'heatmap','pred', 'input_pred', 'all_groups', 'second_group', 'first_group',
-             'final_group', 'input_pred_label', 'input_pred_distinct_labels'
+             'final_group', 'input_pred_label', 'input_pred_distinct_labels', 'final_group_pred', 'entropy_map'
         ], vis_mode
         #imgtensor: [B,C,H,W]
         #
@@ -621,6 +707,7 @@ class GroupViTSegInference(EncoderDecoder):
             attn_map = rearrange(attn_map, 'b h w g -> b g h w')
             attn_map = F.interpolate(
                     attn_map, size=img_show.shape[:2], mode='bilinear', align_corners=self.align_corners)
+            
             pre_attention_map = attn_map.squeeze(0)
             for i in range(pre_attention_map.shape[0]):
                 group_atten_map = pre_attention_map[i, :, :]
@@ -715,5 +802,17 @@ class GroupViTSegInference(EncoderDecoder):
                     palette=GROUP_PALETTE[sum(num_groups[:layer_idx]):sum(num_groups[:layer_idx + 1])],
                     out_file=layer_out_file,
                     opacity=0.5)
+        elif vis_mode == 'entropy_map':
+            attn_map = self.get_attn_maps(img_tensor)[-1]
+            print("attention maps", attn_map.shape)
+            attn_map = rearrange(attn_map, 'b h w g -> b g h w')
+            attn_map = F.interpolate(
+                    attn_map, size=img_show.shape[:2], mode='bilinear', align_corners=self.align_corners)
+            print("attention maps after interpolation", attn_map.shape)
+             
+            attn_map = rearrange(attn_map, 'b g h w -> b h w g')
+            attn_map = attn_map.squeeze(0)
+            print("attention maps after squeeze", attn_map.shape)
+            self.save_entropy_maps(attn_map, img_tensor)
         else:
             raise ValueError(f'Unknown vis_type: {vis_mode}')

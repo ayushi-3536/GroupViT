@@ -1,4 +1,4 @@
-66666# -------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # Copyright (c) 2021-2022, NVIDIA Corporation & Affiliates. All rights reserved.
 #
 # This work is made available under the Nvidia Source Code License.
@@ -107,8 +107,8 @@ class MultiLabelContrastive(nn.Module):
                 in_dim=self.img_encoder.width, num_layers=proj_num_layers, out_dim=output_dim)
             self.text_projector = ProjectMLP(
                 in_dim=self.text_encoder.width, num_layers=proj_num_layers, out_dim=output_dim)
-            # self.img_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.img_projector)
-            # self.text_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.text_projector)
+            self.img_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.img_projector)
+            self.text_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.text_projector)
         else:
             self.img_projector = nn.Identity()
             self.text_projector = nn.Identity()

@@ -38,8 +38,9 @@ def build_seg_dataloader(dataset):
     return data_loader
 
 
-def build_seg_inference(model, dataset, text_transform, config):
+def build_seg_inference(model, dataset, text_transform, config, add_synonyms=True):
     cfg = mmcv.Config.fromfile(config.cfg)
+    print("dataset", dataset)
     if len(config.opts):
         cfg.merge_from_dict(OmegaConf.to_container(OmegaConf.from_dotlist(OmegaConf.to_container(config.opts))))
     with_bg = dataset.CLASSES[0] == 'background'
@@ -47,6 +48,19 @@ def build_seg_inference(model, dataset, text_transform, config):
         classnames = dataset.CLASSES[1:]
     else:
         classnames = dataset.CLASSES
+
+    #if add_synonyms and dataset.synonyms is not None then add for every unique value in dataset.synonyms dict a new class
+    # if add_synonyms and dataset.SYNONYMS is not None:
+    #     for key, value in dataset.SYNONYMS.items():
+    #         if value not in classnames:
+    #             #change list to tuple
+    #             value = tuple(value)
+    #             classnames = classnames + value
+    # #keep only unique values
+    # classnames = list(set(classnames))
+    
+    # print("classnames", classnames)
+
     text_tokens = build_dataset_class_tokens(text_transform, config.template, classnames)
     text_embedding = model.build_text_embedding(text_tokens)
     kwargs = dict(with_bg=with_bg)
@@ -54,7 +68,7 @@ def build_seg_inference(model, dataset, text_transform, config):
         kwargs['test_cfg'] = cfg.test_cfg
     seg_model = GroupViTSegInference(model, text_embedding, **kwargs)
 
-    seg_model.CLASSES = dataset.CLASSES
+    seg_model.CLASSES = tuple(classnames) #dataset.CLASSES
     seg_model.PALETTE = dataset.PALETTE
 
     return seg_model
@@ -119,11 +133,14 @@ class LoadTrainImage:
 def build_seg_demo_pipeline():
     """Build a demo pipeline from config."""
     img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+    print("build_seg_demo_pipeline")
     test_pipeline = Compose([
         LoadImage(),
         dict(
             type='MultiScaleFlipAug',
-            img_scale=(2048, 448),
+            
+            img_scale=(2048, 512),
+            #img_scale=(2048, 448),
             flip=False,
             transforms=[
                 dict(type='Resize', keep_ratio=True),

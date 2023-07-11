@@ -9,10 +9,11 @@
 # -------------------------------------------------------------------------
 
 
-from .builder import build_loader, build_text_transform, build_loader_sync, build_train_assessment_dataset
+from .builder import build_loader, build_text_transform, build_loader_sync, build_train_assessment_dataset, build_dataloader, build_clean_dataset
 from .imagenet_template import imagenet_classes, template_meta
+from .clip_dataset import CLIPDataset
 
 __all__ = [
-    'build_loader', build_text_transform, template_meta, imagenet_classes, build_loader_sync, 
-    build_train_assessment_dataset
+    'build_loader', build_text_transform, template_meta, imagenet_classes, build_loader_sync, build_clean_dataset, build_dataloader,
+    build_train_assessment_dataset, CLIPDataset
 ]

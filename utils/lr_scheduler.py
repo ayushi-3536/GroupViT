@@ -12,6 +12,7 @@ from timm.scheduler.cosine_lr import CosineLRScheduler
 
 
 def build_scheduler(config, optimizer, n_iter_per_epoch):
+    print(f'Building {config.lr_scheduler.name} scheduler with {n_iter_per_epoch} iterations per epoch')
     num_steps = int(config.lr_scheduler.decay_epochs * n_iter_per_epoch) 
     warmup_steps = int(config.warmup_epochs * n_iter_per_epoch)
 

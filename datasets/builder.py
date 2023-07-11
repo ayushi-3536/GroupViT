@@ -43,7 +43,7 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.data.transforms import _pil_interp
 from torchvision import transforms
 from scripts import load_nouns
-
+from .clip_dataset import CLIPDataset
 from .formatting import ToDataContainer
 from .tokenizer import SimpleTokenizer
 
@@ -55,6 +55,61 @@ def worker_init_fn(worker_id, num_workers, rank, seed):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+def collate_fn(batch):  
+    img = torch.stack([b['image'] for b in batch])
+    caption = torch.stack([b['text'] for b in batch])
+    if 'text_meta' in batch[0]:
+        if type(batch[0]['text_meta']) is torch.Tensor:
+            nouns = torch.stack([b['text_meta'] for b in batch])
+        else:
+            nouns = [b['text_meta'] for b in batch]
+    if 'text_meta' in batch[0]:
+        return {    
+            'image':img,
+            'text':caption,
+            'text_meta':nouns,
+        }
+    else:
+        return {    
+            'image':img,
+            'text':caption,
+        }
+
+
+def build_dataloader(config):
+    
+    dataset_train = build_clean_dataset(is_train=True, config=config)
+    print('successfully build train dataset')
+    #dataset_val = build_clean_dataset(is_train=False, config=config)
+    # print(f'local rank {local_rank} / global rank {dist.get_rank()} \
+    #     successfully build val dataset')
+
+
+    sampler_train = torch.utils.data.DistributedSampler(dataset_train, shuffle=True)        
+    #sampler_train = torch.utils.data.SequentialSampler(dataset_train)
+    print('train batch size: ', config.batch_size)
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train,
+        sampler=sampler_train,
+        batch_size=config.batch_size,
+        num_workers=config.num_workers,
+        pin_memory=True,
+        drop_last=True,
+        persistent_workers=True,
+        collate_fn=collate_fn ### NOTEL THIS ###
+        #shuffle=True,
+    )
+
+    # data_loader_val = torch.utils.data.DataLoader(
+    #     dataset_val,
+    #     sampler=sampler_val,
+    #     batch_size=config.val.batch_size,
+    #     num_workers=config.val.num_workers,
+    #     pin_memory=True,
+    #     drop_last=False,
+    #     persistent_workers=True,
+    # )
+    return dataset_train, data_loader_train
 
 def build_loader(config):
     local_rank = dist.get_rank() % torch.cuda.device_count() if dist.is_initialized() else 0
@@ -139,6 +194,24 @@ def warn_and_continue(exn):
     warnings.warn(repr(exn))
     return True
 
+def build_clean_dataset(is_train, config):
+    img_transform = build_img_transform(is_train, config.img_aug, with_dc=False)
+    text_transform = build_text_transform(is_train, config.text_aug, with_dc=False, return_meta=True)
+    split = 'train' if is_train else 'val'
+    print('split: ', split)
+    dataset = CLIPDataset(
+        root_dir=config[split]['root_dir'],
+        meta_file=config[split]['meta_file'],
+        img_transform=img_transform,
+        text_transform=text_transform,
+        evaluator=None, # no evaluator for now
+        image_reader_type='pil',
+        fseek=config[split].get('fseek',False),
+        split=split,
+        multi_label=config.text_aug.multi_label
+    )
+    print('dataset len: ', len(dataset))
+    return dataset
 
 def build_dataset(is_train, config):
     img_transform = build_img_transform(is_train, config.img_aug)
@@ -374,12 +447,13 @@ def build_img_transform(is_train, config, with_dc=True):
     return transform
 
 
-def build_text_transform(is_train, config, with_dc=True, train_assessment=False):
+def build_text_transform(is_train, config, with_dc=True, train_assessment=False, return_meta=False):
     local_rank = dist.get_rank() % torch.cuda.device_count() if dist.is_initialized() else 0
     if config.multi_label and is_train:
         # only down on local rank 0
         if local_rank == 0:
-            nltk.download('popular')
+            #nltk.download('popular')
+            nltk.data.path.append('/home/sharmaa/nltk_data')
         transform = WordAugTokenizeWrapper(
             Tokenize(SimpleTokenizer(), max_seq_len=config.max_seq_len),
             max_word=config.multi_label,
@@ -387,9 +461,13 @@ def build_text_transform(is_train, config, with_dc=True, train_assessment=False)
             pre_computed_nouns=config.pre_generated_nouns,
             generate_prompt_for_np=config.generate_prompt_for_np,
             train_assessment=train_assessment,
+            template_set=config.template_set,
             generate_prompt=config.generate_prompt,
             with_caption=config.with_caption,
-            max_length_fixed=config.max_length_fixed)
+            max_length_fixed=config.max_length_fixed,
+            select_nouns=config.select_nouns,
+            return_meta=return_meta
+            )
     else:
         transform = Tokenize(SimpleTokenizer(), max_seq_len=config.max_seq_len)
 
@@ -424,7 +502,7 @@ class Tokenize:
                     tokens[-1] = eot_token
                 else:
                     raise RuntimeError(f'Input {texts[i]} is too long for context length {self.max_seq_len}')
-            result[i, :len(tokens)] = torch.tensor(tokens)
+            result[i, :len(tokens)] = torch.tensor(tokens, dtype=torch.long)
 
         if expanded_dim:
             return result[0]
@@ -435,7 +513,8 @@ class Tokenize:
 class WordAugTokenizeWrapper:
 
     def __init__(self, tokenize, max_word=3, template_set='subset', word_type='noun', pre_computed_nouns=False,
-                  generate_prompt_for_np=True, train_assessment=False, generate_prompt=True, with_caption=True, max_length_fixed=True):
+                  generate_prompt_for_np=True, train_assessment=False, generate_prompt=True, with_caption=True, max_length_fixed=True, select_nouns=None,
+                  return_meta=False):
         self.tokenize = tokenize
         self.max_word = max_word
         from .imagenet_template import (full_imagenet_templates, sub_imagenet_template, simple_imagenet_template,
@@ -452,6 +531,7 @@ class WordAugTokenizeWrapper:
         else:
             raise ValueError
         self.templates = templates
+        print("word_type", word_type)
         assert word_type in ['noun', 'noun_phrase']
         self.word_type = word_type
         self.pre_computed_nouns = pre_computed_nouns
@@ -470,6 +550,21 @@ class WordAugTokenizeWrapper:
                 self.caption_nouns_dict = pickle.load(f)
         self.generate_prompt_for_np = generate_prompt_for_np
         self.max_length_fixed=max_length_fixed
+        self.select_nouns = select_nouns
+        import json
+        print("select_nouns", self.select_nouns)
+        if self.select_nouns:
+            if self.select_nouns==100:
+                self.noun_list = json.loads(open('/misc/student/sharmaa/groupvit/GroupViT/cleaner_noun_frequency_gt_100.json').read())
+            elif self.select_nouns==500:
+                self.noun_list = json.loads(open('/misc/student/sharmaa/groupvit/GroupViT/cleaner_noun_frequency_gt_1000.json').read())
+            elif self.select_nouns==1000:
+                self.noun_list = json.loads(open('/misc/student/sharmaa/groupvit/GroupViT/noun_frequency_gt_1000.json').read())
+            elif self.select_nouns==2500:
+                self.noun_list = json.loads(open('/misc/student/sharmaa/groupvit/GroupViT/noun_frequency_gt_2500.json').read())
+            elif self.select_nouns==5000:
+                self.noun_list = json.loads(open('/misc/student/sharmaa/groupvit/GroupViT/noun_frequency_gt_5000.json').read())
+        self.return_meta = return_meta
 
     def get_tag(self, tokenized, tags):
         if not isinstance(tags, (list, tuple)):
@@ -519,14 +614,18 @@ class WordAugTokenizeWrapper:
             nouns = self.caption_nouns_dict[text]
         else:
             if len(tokenized) > 0:
-                if self.word_type == 'noun':
-                    nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP']) #, 'VBG', 'VB', 'VBD', 'VBN', 'VBP', 'VBZ'])
-                elif self.word_type == 'noun_phrase':
-                    nouns = list(set(self.get_noun_phrase(tokenized) + self.get_tag(tokenized, ['NN', 'NNS', 'NNP'])))
+                nouns = self.get_tag(tokenized, ['NN', 'NNS', 'NNP']) #, 'VBG', 'VB', 'VBD', 'VBN', 'VBP', 'VBZ'])
+                #keep nouns only if there present as keys in the noun_list, else remove them but if none of the nouns are present then keep all
+                if self.select_nouns:
+                    nouns = [noun for noun in nouns if noun in self.noun_list] if len([noun for noun in nouns if noun in self.noun_list])>0 else nouns
+                   
+                if self.word_type == 'noun_phrase':
+                    nouns = list(set(self.get_noun_phrase(tokenized) + nouns))
                 else:
                     raise ValueError('word_type must be noun or noun_phrase')
 
         texts = []
+        
         if len(nouns) > 0:
             if self.max_length_fixed:
                 nouns = np.random.choice(nouns, min(self.max_word, len(nouns)), replace=False)
@@ -537,14 +636,26 @@ class WordAugTokenizeWrapper:
                     texts = [np.random.choice(self.templates).format(noun) for noun in nouns]
             else:
                 texts = [noun for noun in nouns]
+        
+        # check if nouns is not empty
+        if len(nouns) > 0:
+            nouns= nouns.tolist()
+        #print("nouns", nouns)
         if self.max_length_fixed and len(texts) < self.max_word and not self.train_assessment:
-            texts += [text] * (self.max_word - len(texts))
+            texts += ['<PAD>'] * (self.max_word - len(texts))
+            nouns += ['<PAD>'] * (self.max_word - len(nouns))
+        
+        #asset texts and nouns have same length
+        assert len(texts)==len(nouns)
+        
         if self.train_assessment:
             texts = ['background'] + [text] + texts
         elif self.with_caption: 
             texts = [text] + texts
-        print("texts",texts)
         if self.train_assessment:
             return texts, self.tokenize(texts)
+        elif self.return_meta:
+            #return self.tokenize(texts), self.tokenize(nouns)
+            return self.tokenize(texts), nouns
         else:
             return self.tokenize(texts)

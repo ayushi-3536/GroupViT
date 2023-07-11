@@ -107,8 +107,8 @@ class MultiLabelContrastive_PACL(nn.Module):
                 in_dim=self.img_encoder.width, num_layers=proj_num_layers, out_dim=output_dim)
             self.text_projector = ProjectMLP(
                 in_dim=self.text_encoder.width, num_layers=proj_num_layers, out_dim=output_dim)
-            # self.img_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.img_projector)
-            # self.text_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.text_projector)
+            self.img_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.img_projector)
+            self.text_projector = nn.SyncBatchNorm.convert_sync_batchnorm(self.text_projector)
         else:
             self.img_projector = nn.Identity()
             self.text_projector = nn.Identity()
@@ -221,6 +221,7 @@ class MultiLabelContrastive_PACL(nn.Module):
             torch.eye(batch, dtype=image_x.dtype, device=image_x.device), 'b1 b2 -> b1 1 b2 1 1')
         # [BxL1, WxBxL2]
         labels_per_img = rearrange(labels_per_img, 'b1 l1 b2 l2 w -> (b1 l1) (w b2 l2)')
+        
         # [B, L2, B, L1, W]
         labels_per_text = F.one_hot(
             torch.ones(batch, text_len, batch, img_len, dtype=torch.long, device=text_x.device) * dist.get_rank(),
@@ -401,6 +402,7 @@ class MultiLabelContrastive_PACL(nn.Module):
                                                                     text_multi_label_x) * self.multi_label_loss_weight
 
         return losses_dict
+    
     def forward_train_sync(self, image, text):
         text_outs = self.encode_text(text, as_dict=True)
         # [B, C]
@@ -425,8 +427,8 @@ class MultiLabelContrastive_PACL(nn.Module):
             text_multi_label_x = text_outs['text_multi_label_x']
             losses_dict['multi_label_loss'] = self.multi_label_loss_sync(image_multi_label_x,
                                                                     text_multi_label_x) * self.multi_label_loss_weight
-
         return losses_dict
+    
     def forward_test(self, image, text):
         return self.zero_shot_pred(image, text)
 

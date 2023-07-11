@@ -4,7 +4,7 @@ data:
     multi_label: 3
 
 checkpoint:
-  key_mapper: '/home/sharmaa/groupvit/GroupViT/configs/key_mapper_gs3.yml'
+  key_mapper: '/misc/student/sharmaa/groupvit/GroupViT/configs/key_mapper_gs3.yml'
 
 model:
   type: MultiLabelContrastive

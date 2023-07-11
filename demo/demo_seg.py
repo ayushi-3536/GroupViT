@@ -31,8 +31,8 @@ def parse_args():
     parser = argparse.ArgumentParser('GroupViT demo')
     parser.add_argument(
         '--cfg',
+        default='/misc/student/sharmaa/groupvit/GroupViT/configs/DINO_feat_distill.yml',
         type=str,
-        required=True,
         help='path to config file',
     )
     parser.add_argument(
@@ -42,20 +42,20 @@ def parse_args():
         nargs='+',
     )
 
-    parser.add_argument('--resume', help='resume from checkpoint')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument(
         '--vis',
         help='Specify the visualization mode, '
         'could be a list, support "input", "pred", "input_pred", "all_groups", "first_group", "final_group", "input_pred_label"',
-        default=None,
+        default="pred",
         nargs='+')
 
     parser.add_argument('--device', default='cpu', help='Device used for inference')
     parser.add_argument(
         '--dataset', default='coco', choices=['voc', 'coco', 'context'], help='dataset classes for visualization')
 
-    parser.add_argument('--input', type=str, help='input image path')
-    parser.add_argument('--output_dir', type=str, help='output dir')
+    parser.add_argument('--input', default='demo/examples/coco.jpg', type=str, help='input image path')
+    parser.add_argument('--output_dir', default='demo/output', type=str, help='output dir')
 
     args = parser.parse_args()
     args.local_rank = 0  # compatible with config

@@ -17,7 +17,7 @@ test_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(
         type='MultiScaleFlipAug',
-        # img_scale=(2048, 512),
+        #img_scale=(2048, 512),
         img_scale=(2048, 448),
         # img_ratios=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75],
         flip=False,
@@ -38,4 +38,18 @@ data = dict(
         pipeline=test_pipeline))
 
 # test_cfg = dict(bg_thresh=.95, mode='whole')
-test_cfg = dict(bg_thresh=.95, mode='slide', stride=(224, 224), crop_size=(448, 448))
+
+#For stride 384, crop 448, Vary bg_thresh
+#test_cfg = dict(bg_thresh=.95, mode='slide', stride=(384, 384), crop_size=(448, 448))
+#test_cfg = dict(bg_thresh=.9, mode='slide', stride=(384, 384), crop_size=(448, 448))
+#test_cfg = dict(bg_thresh=.8, mode='slide', stride=(384, 384), crop_size=(448, 448))
+
+#For stride 448, crop 448, Vary bg_thresh
+#test_cfg = dict(bg_thresh=.95, mode='slide', stride=(448, 448), crop_size=(448, 448))
+#currently here
+#test_cfg = dict(bg_thresh=.9, mode='slide', stride=(448, 448), crop_size=(448, 448))
+#test_cfg = dict(bg_thresh=.8, mode='slide', stride=(448, 448), crop_size=(448, 448))
+
+test_cfg = dict(bg_thresh=.8, mode='slide', stride=(224, 224), crop_size=(448, 448))
+#test_cfg = dict(bg_thresh=.9, mode='slide', stride=(224, 224), crop_size=(448, 448))
+#test_cfg = dict(bg_thresh=.95, mode='slide', stride=(224, 224), crop_size=(448, 448))
